@@ -2,6 +2,9 @@
 
 A small Python scraper for collecting event and announcement information from partner websites into normalized CSV or JSON.
 
+It also includes a Cloudflare Worker entry point that can run the incoming-event
+scrape on a daily cron and write events to Monday.com.
+
 ## Setup
 
 ```bash
@@ -59,6 +62,16 @@ For local CLI runs, keep using the environment variable with the same name:
 ```bash
 export MONDAY_API_TOKEN="your-token"
 ```
+
+## Deploy Worker
+
+```bash
+npm install
+npm run deploy
+```
+
+The Worker is configured in `wrangler.jsonc` to run daily at `13:00 UTC`. You
+can also manually trigger it by sending a `POST` request to the deployed Worker.
 
 The default partner list lives in `partners.yaml`. Add new partners there and choose the parser that best matches the site:
 
