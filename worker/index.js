@@ -44,17 +44,28 @@ export default {
       });
     }
 
-    const result = await scrapeAndWrite(env);
-    return Response.json(result);
+    try {
+      const result = await scrapeAndWrite(env);
+      return Response.json(result);
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: error.message || "Worker run failed." },
+        { status: 500 },
+      );
+    }
   },
 
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(scrapeAndWrite(env));
+    ctx.waitUntil(
+      scrapeAndWrite(env).catch((error) => {
+        console.error(error);
+      }),
+    );
   },
 };
 
 async function scrapeAndWrite(env) {
-  const token = env.MONDAY_API_TOKEN;
+  const token = await env.MONDAY_API_TOKEN?.get();
   if (!token) {
     throw new Error("Missing MONDAY_API_TOKEN binding.");
   }
