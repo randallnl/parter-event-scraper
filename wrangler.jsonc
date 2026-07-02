@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "partner-event-scraper",
+  "name": "parter-event-scraper",
   "main": "worker/index.js",
   "compatibility_date": "2026-07-02",
   "triggers": {
