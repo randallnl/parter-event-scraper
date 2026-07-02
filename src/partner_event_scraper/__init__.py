@@ -1,0 +1,1 @@
+"""Partner event scraper package."""

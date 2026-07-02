@@ -1,0 +1,35 @@
+partners:
+  - name: "603 Equality"
+    url: "https://603equality.org/events"
+    parser: "squarespace_events"
+    kind: "event"
+
+  - name: "New Hampshire Center for Justice & Equity"
+    url: "https://nhcje.org/blog"
+    parser: "squarespace_blog"
+    kind: "announcement"
+
+  - name: "Black Heritage Trail NH"
+    url: "https://blackheritagetrailnh.org/all-events"
+    parser: "heading_date_events"
+    kind: "event"
+
+  - name: "Black Lives Matter NH"
+    url: "https://blmnh.org/events"
+    parser: "squarespace_events"
+    kind: "event"
+
+  - name: "Racial Unity Team"
+    url: "https://rutnh.org/Events/"
+    parser: "generic_links"
+    kind: "event"
+
+  - name: "New Hampshire Outright"
+    url: "https://www.nhoutright.org/calendar"
+    parser: "generic_links"
+    kind: "event"
+
+  - name: "ABLE NH"
+    url: "https://ablenh.org/category/able-nh-news/"
+    parser: "wordpress_posts"
+    kind: "announcement"
