@@ -69,3 +69,45 @@ def test_wordpress_posts_extracts_post_date():
     assert records[0].title == "ABLE NH receives funding"
     assert records[0].start_date == "2024-11-12"
     assert records[0].kind == "announcement"
+
+
+def test_shopify_blog_events_extracts_all_blog_cards_as_events():
+    html = """
+    <div class="article-card-wrapper card-wrapper">
+      <a href="/blogs/upcoming-events/june-2026-events" class="card-inner-content" aria-label="June 2026 Events"></a>
+      <div class="card-content">
+        <h3><a href="/blogs/upcoming-events/june-2026-events">June 2026 Events</a></h3>
+      </div>
+    </div>
+    <div class="article-card-wrapper card-wrapper">
+      <a href="/blogs/upcoming-events/north-country-commons" aria-label="North Country Commons, July 19"></a>
+      <div class="card-content">
+        <h3><a href="/blogs/upcoming-events/north-country-commons">North Country Commons, July 19</a></h3>
+        <div class="card-description light">Community is Power</div>
+      </div>
+    </div>
+    <div class="article-card-wrapper card-wrapper">
+      <a href="/blogs/upcoming-events/currier-trip" aria-label="Currier Trip"></a>
+      <div class="card-content">
+        <h3><a href="/blogs/upcoming-events/currier-trip">Currier Trip</a></h3>
+      </div>
+    </div>
+    """
+    partner = {
+        "name": "Queerlective",
+        "url": "https://queerlective.com/blogs/upcoming-events",
+        "parser": "shopify_blog_events",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-07-10T12:00:00+00:00")
+
+    assert [record.title for record in records] == [
+        "June 2026 Events",
+        "North Country Commons, July 19",
+        "Currier Trip",
+    ]
+    assert records[0].start_date == "2026-06-01"
+    assert records[1].start_date == "2026-07-19"
+    assert records[2].start_date == "2026-07-10"
+    assert all(record.kind == "event" for record in records)

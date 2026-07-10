@@ -83,6 +83,7 @@ The default partner list lives in `partners.yaml`. Add new partners there and ch
 - `squarespace_blog`: Squarespace blog or announcement listings.
 - `wordpress_posts`: WordPress category/archive post listings.
 - `generic_links`: fallback that records dated links from simple pages.
+- `shopify_blog_events`: Shopify blog listings where every article should be imported as an event.
 
 ## Output Fields
 

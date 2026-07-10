@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import dateparser
 from bs4 import BeautifulSoup, Tag
@@ -23,6 +23,11 @@ TIME_RANGE_RE = re.compile(
     r"(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))\b"
 )
 COMPACT_POST_DATE_RE = re.compile(r"\b\d{1,2}/\d{1,2}/\d{2}\b")
+MONTH_YEAR_RE = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b",
+    flags=re.I,
+)
 
 
 def parse_html(html: str, partner: dict, scraped_at: str) -> list[EventRecord]:
@@ -186,6 +191,55 @@ def generic_links(
         )
 
 
+def shopify_blog_events(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    source_url = partner["url"]
+    blog_path = urlparse(source_url).path.rstrip("/")
+    seen_urls: set[str] = set()
+
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+        if not urlparse(urljoin(source_url, href)).path.startswith(f"{blog_path}/"):
+            continue
+        url = urljoin(source_url, href)
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        card = link.find_parent(class_=re.compile(r"\barticle-card-wrapper\b|\bcard-wrapper\b"))
+        if not card:
+            card = link.find_parent(class_=re.compile(r"\bcard\b"))
+        title = clean_text(link.get_text(" ")) or clean_text(link.get("aria-label", ""))
+        if not title and card:
+            image = card.find("img", alt=True)
+            title = clean_text(image["alt"]) if image else ""
+        if not title or title.lower() == "view all":
+            continue
+
+        description = ""
+        if card:
+            description_node = card.find(class_=re.compile(r"\bcard-description\b"))
+            description = clean_text(description_node.get_text(" ")) if description_node else ""
+        date_text = first_post_date(f"{title} {description}") or month_year_date(title)
+        start_date = normalize_date(date_text) if date_text else scraped_at[:10]
+        start_time, end_time = parse_time_range(description)
+
+        yield EventRecord(
+            partner=partner["name"],
+            title=title,
+            start_date=start_date,
+            start_time=start_time,
+            end_time=end_time,
+            location=find_location(description),
+            description=shorten(description or title, 700),
+            url=url,
+            source_url=source_url,
+            kind=partner.get("kind", "event"),
+            scraped_at=scraped_at,
+        )
+
+
 def collect_until_next_heading(start: Tag, max_nodes: int = 12) -> list[Tag]:
     nodes: list[Tag] = []
     for sibling in start.next_siblings:
@@ -233,6 +287,12 @@ def first_post_date(text: str) -> str:
     if match := COMPACT_POST_DATE_RE.search(text):
         return match.group(0)
     return full_date_from_text(text)
+
+
+def month_year_date(text: str) -> str:
+    if match := MONTH_YEAR_RE.search(text):
+        return f"{match.group(1)} 1, {match.group(2)}"
+    return ""
 
 
 def following_text(node: Tag, limit: int = 400) -> str:
@@ -313,4 +373,5 @@ PARSERS: dict[str, Callable[[BeautifulSoup, dict, str], Iterable[EventRecord]]] 
     "squarespace_blog": squarespace_blog,
     "wordpress_posts": wordpress_posts,
     "generic_links": generic_links,
+    "shopify_blog_events": shopify_blog_events,
 }

@@ -152,6 +152,8 @@ function parsePartner(html, partner) {
       return parseSquarespaceBlog(cleanHtml, partner);
     case "wordpress_posts":
       return parseWordPressPosts(cleanHtml, partner);
+    case "shopify_blog_events":
+      return parseShopifyBlogEvents(cleanHtml, partner);
     default:
       throw new Error(`Unsupported parser: ${partner.parser}`);
   }
@@ -332,6 +334,50 @@ function parseWordPressPosts(html, partner) {
   return records;
 }
 
+function parseShopifyBlogEvents(html, partner) {
+  const records = [];
+  const seenUrls = new Set();
+  const blogPath = new URL(partner.url).pathname.replace(/\/+$/, "");
+  const articleLinkPattern = new RegExp(
+    `<a\\b[^>]*href=["'](${escapeRegExp(blogPath)}\\/[^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>`,
+    "gi",
+  );
+
+  for (const match of html.matchAll(articleLinkPattern)) {
+    const url = absoluteUrl(match[1], partner.url);
+    if (seenUrls.has(url)) {
+      continue;
+    }
+    seenUrls.add(url);
+
+    const context = nearbyHtml(html, match.index, 2200);
+    const title = shopifyArticleTitle(match[0], match[2], context);
+    if (!title || title.toLowerCase() === "view all") {
+      continue;
+    }
+
+    const description = shopifyCardDescription(context);
+    const dateText = firstPostDate(`${title} ${description}`) || monthYearDate(title);
+    const timeRange = parseTimeRange(description);
+
+    records.push({
+      partner: partner.name,
+      title,
+      startDate: normalizeDate(dateText) || new Date().toISOString().slice(0, 10),
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+      location: locationFromText(description),
+      description: shorten(description || title, 700),
+      url,
+      sourceUrl: partner.url,
+      kind: partner.kind || "event",
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  return records;
+}
+
 function toImportRecord(record) {
   return {
     partner: record.partner,
@@ -441,12 +487,34 @@ function followingHtml(html, headings, index, limit) {
   return textFromHtml(html.slice(start, end)).slice(0, limit);
 }
 
+function nearbyHtml(html, index, radius) {
+  return html.slice(Math.max(0, index - radius), Math.min(html.length, index + radius));
+}
+
 function firstHref(html) {
   return html.match(/href=["']([^"']+)["']/i)?.[1] || "";
 }
 
 function absoluteUrl(href, baseUrl) {
   return new URL(href, baseUrl).toString();
+}
+
+function shopifyArticleTitle(anchorHtml, anchorText, context) {
+  const text = textFromHtml(anchorText);
+  if (text) {
+    return text;
+  }
+  const ariaLabel = anchorHtml.match(/\baria-label=["']([^"']+)["']/i)?.[1] || "";
+  if (ariaLabel) {
+    return textFromHtml(ariaLabel);
+  }
+  const imageAlt = context.match(/\balt=["']([^"']+)["']/i)?.[1] || "";
+  return textFromHtml(imageAlt);
+}
+
+function shopifyCardDescription(context) {
+  const match = context.match(/<div\b[^>]*class=["'][^"']*\bcard-description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+  return match ? textFromHtml(match[1]) : "";
 }
 
 function textFromHtml(html) {
@@ -500,6 +568,13 @@ function firstShortDate(text) {
   return text.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/)?.[0] || "";
 }
 
+function monthYearDate(text) {
+  const match = text.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/i,
+  );
+  return match ? `${match[1]} 1, ${match[2]}` : "";
+}
+
 function longDatePattern(flags = "i") {
   return new RegExp(
     "\\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?(?:day|sday|nesday|rsday|urday)?[,]?\\s*" +
@@ -515,9 +590,19 @@ function normalizeDate(text) {
     return text;
   }
 
-  const parsed = new Date(`${text} 00:00:00 GMT-0500`);
+  const hasYear = /\b\d{4}\b/.test(text);
+  const year = new Date().getFullYear();
+  const dateText = hasYear ? text : `${text}, ${year}`;
+  let parsed = new Date(`${dateText} 00:00:00 GMT-0500`);
   if (Number.isNaN(parsed.valueOf())) {
     return "";
+  }
+  if (!hasYear) {
+    const today = new Date().toISOString().slice(0, 10);
+    const parsedDate = parsed.toISOString().slice(0, 10);
+    if (parsedDate < today) {
+      parsed = new Date(`${text}, ${year + 1} 00:00:00 GMT-0500`);
+    }
   }
   return parsed.toISOString().slice(0, 10);
 }
@@ -546,4 +631,8 @@ function removeCalendarNoise(text) {
 function shorten(text, limit) {
   const clean = cleanText(text);
   return clean.length <= limit ? clean : `${clean.slice(0, limit - 3).trim()}...`;
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
