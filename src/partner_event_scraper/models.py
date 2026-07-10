@@ -13,6 +13,7 @@ class EventRecord:
     end_time: str = ""
     location: str = ""
     description: str = ""
+    image_url: str = ""
     url: str = ""
     source_url: str = ""
     kind: str = "event"

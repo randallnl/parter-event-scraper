@@ -73,6 +73,7 @@ def squarespace_events(
             end_time=end_time,
             location=find_location(block_text),
             description=shorten(remove_calendar_noise(block_text), 700),
+            image_url=find_image_url(block, source_url),
             url=href,
             source_url=source_url,
             kind=partner.get("kind", "event"),
@@ -109,6 +110,7 @@ def heading_date_events(
             start_date=current_date,
             location=find_location(block_text),
             description=shorten(block_text, 700),
+            image_url=find_image_url([node, *collect_until_next_heading(node)], source_url),
             url=urljoin(source_url, link["href"]) if link else source_url,
             source_url=source_url,
             kind=partner.get("kind", "event"),
@@ -134,6 +136,7 @@ def squarespace_blog(
             title=title,
             start_date=normalize_date(date_text),
             description=shorten(following_text(heading, limit=500), 500),
+            image_url=find_image_url([heading, *collect_until_next_heading(heading)], source_url),
             url=urljoin(source_url, link["href"]) if link else source_url,
             source_url=source_url,
             kind=partner.get("kind", "announcement"),
@@ -159,6 +162,7 @@ def wordpress_posts(
             title=title,
             start_date=normalize_date(date_text),
             description=shorten(remove_author_date(block_text), 500),
+            image_url=find_image_url([heading, *collect_until_next_heading(heading)], source_url),
             url=urljoin(source_url, link["href"]) if link else source_url,
             source_url=source_url,
             kind=partner.get("kind", "announcement"),
@@ -184,6 +188,7 @@ def generic_links(
             title=clean_text(title) or text,
             start_date=normalize_date(date_text),
             description=shorten(context, 400),
+            image_url=find_image_url([link], source_url),
             url=urljoin(source_url, link["href"]),
             source_url=source_url,
             kind=partner.get("kind", "event"),
@@ -233,6 +238,7 @@ def shopify_blog_events(
             end_time=end_time,
             location=find_location(description),
             description=shorten(description or title, 700),
+            image_url=find_image_url([card] if card else [link], source_url),
             url=url,
             source_url=source_url,
             kind=partner.get("kind", "event"),
@@ -279,6 +285,25 @@ def find_location(text: str) -> str:
         if match := re.search(pattern, text, flags=re.I):
             return clean_text(match.group(1))
     return ""
+
+
+def find_image_url(nodes: list[Tag | None], source_url: str) -> str:
+    for node in nodes:
+        if not isinstance(node, Tag):
+            continue
+        image = node.find("img")
+        if not image:
+            continue
+        value = image.get("src") or first_srcset_url(image.get("srcset", ""))
+        if value:
+            return urljoin(source_url, value)
+    return ""
+
+
+def first_srcset_url(srcset: str) -> str:
+    if not srcset:
+        return ""
+    return srcset.split(",", 1)[0].strip().split(" ", 1)[0]
 
 
 def first_post_date(text: str) -> str:

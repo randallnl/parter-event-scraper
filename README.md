@@ -97,6 +97,7 @@ Each record includes:
 - `end_time`
 - `location`
 - `description`
+- `image_url`
 - `url`
 - `source_url`
 - `kind`

@@ -74,6 +74,7 @@ def test_wordpress_posts_extracts_post_date():
 def test_shopify_blog_events_extracts_all_blog_cards_as_events():
     html = """
     <div class="article-card-wrapper card-wrapper">
+      <img src="//cdn.example.com/june.png" alt="June 2026 Events">
       <a href="/blogs/upcoming-events/june-2026-events" class="card-inner-content" aria-label="June 2026 Events"></a>
       <div class="card-content">
         <h3><a href="/blogs/upcoming-events/june-2026-events">June 2026 Events</a></h3>
@@ -108,6 +109,7 @@ def test_shopify_blog_events_extracts_all_blog_cards_as_events():
         "Currier Trip",
     ]
     assert records[0].start_date == "2026-06-01"
+    assert records[0].image_url == "https://cdn.example.com/june.png"
     assert records[1].start_date == "2026-07-19"
     assert records[2].start_date == "2026-07-10"
     assert all(record.kind == "event" for record in records)

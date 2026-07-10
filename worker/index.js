@@ -188,6 +188,7 @@ function parseSquarespaceEvents(html, partner) {
       endTime: timeRange.endTime,
       location: locationFromText(blockText),
       description: shorten(removeCalendarNoise(blockText), 700),
+      imageUrl: firstImageUrl(block, partner.url),
       url: absoluteUrl(firstHref(heading.content) || firstHref(block) || partner.url, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "event",
@@ -231,6 +232,7 @@ function parseHeadingDateEvents(html, partner) {
       endTime: timeRange.endTime,
       location: locationFromText(blockText),
       description: shorten(blockText, 700),
+      imageUrl: firstImageUrl(raw + blockText, partner.url),
       url: absoluteUrl(firstHref(raw) || partner.url, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "event",
@@ -257,6 +259,7 @@ function parseGenericLinks(html, partner) {
       title: cleanText(text.replace(dateText, "")) || text,
       startDate: normalizeDate(dateText),
       description: shorten(text, 400),
+      imageUrl: firstImageUrl(match[0], partner.url),
       url: absoluteUrl(match[1], partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "event",
@@ -291,6 +294,7 @@ function parseSquarespaceBlog(html, partner) {
       title,
       startDate: normalizeDate(dateText),
       description: shorten(textFromHtml(following), 500),
+      imageUrl: firstImageUrl(`${heading.raw} ${following}`, partner.url),
       url: absoluteUrl(firstHref(heading.content) || partner.url, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "announcement",
@@ -324,6 +328,7 @@ function parseWordPressPosts(html, partner) {
       title,
       startDate: normalizeDate(dateText),
       description: shorten(removeFirstLongDate(blockText), 500),
+      imageUrl: firstImageUrl(`${heading.raw} ${following}`, partner.url),
       url: absoluteUrl(firstHref(heading.content) || partner.url, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "announcement",
@@ -368,6 +373,7 @@ function parseShopifyBlogEvents(html, partner) {
       endTime: timeRange.endTime,
       location: locationFromText(description),
       description: shorten(description || title, 700),
+      imageUrl: firstImageUrl(context, partner.url),
       url,
       sourceUrl: partner.url,
       kind: partner.kind || "event",
@@ -388,6 +394,7 @@ function toImportRecord(record) {
     end_time: record.endTime || "",
     location: record.location || "",
     description: record.description || "",
+    image_url: record.imageUrl || "",
     url: record.url || "",
     source_url: record.sourceUrl || "",
     kind: record.kind || "event",
@@ -493,6 +500,31 @@ function nearbyHtml(html, index, radius) {
 
 function firstHref(html) {
   return html.match(/href=["']([^"']+)["']/i)?.[1] || "";
+}
+
+function firstImageUrl(html, baseUrl) {
+  const imageMatch = html.match(/<img\b[^>]*>/i);
+  if (!imageMatch) {
+    return "";
+  }
+
+  const imageHtml = imageMatch[0];
+  const src =
+    attributeValue(imageHtml, "src") ||
+    firstSrcsetUrl(attributeValue(imageHtml, "srcset")) ||
+    attributeValue(imageHtml, "data-src");
+  return src ? absoluteUrl(src, baseUrl) : "";
+}
+
+function attributeValue(html, name) {
+  return html.match(new RegExp(`\\b${name}=["']([^"']+)["']`, "i"))?.[1] || "";
+}
+
+function firstSrcsetUrl(srcset) {
+  if (!srcset) {
+    return "";
+  }
+  return srcset.split(",", 1)[0].trim().split(/\s+/, 1)[0];
 }
 
 function absoluteUrl(href, baseUrl) {
