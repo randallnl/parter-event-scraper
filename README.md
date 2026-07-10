@@ -3,7 +3,9 @@
 A small Python scraper for collecting event and announcement information from partner websites into normalized CSV or JSON.
 
 It also includes a Cloudflare Worker entry point that can run the incoming-event
-scrape on a daily cron and write events to Monday.com.
+scrape on a daily cron. The Worker now asks NH Solidarity Ecosystem which
+organizations to scrape, scrapes those sources, and imports normalized events
+back into NH Solidarity Ecosystem.
 
 ## Setup
 
@@ -20,8 +22,8 @@ partner-events scrape --output events.csv
 partner-events scrape --format json --output events.json
 ```
 
-To write incoming dated events to Monday.com, set a Monday API token and add
-`--write-monday`:
+The Python CLI can still write incoming dated events to Monday.com for local
+runs. Set a Monday API token and add `--write-monday`:
 
 ```bash
 export MONDAY_API_TOKEN="your-token"
@@ -35,29 +37,7 @@ By default this writes future/current `event` records to board `18420375431` wit
 - event details: `text_mm4wpkzw`
 - event link: `link_mm4w7r6`
 
-## Cloudflare Worker Secret Binding
-
-If this runs from a Cloudflare Worker, bind the Monday token as
-`MONDAY_API_TOKEN`. In `wrangler.jsonc`, the secret-store binding should look
-like this:
-
-```jsonc
-"secrets_store_secrets": [
-  {
-    "binding": "MONDAY_API_TOKEN",
-    "store_id": "2b9ec8a0d6d742649ad4d3498815ca54",
-    "secret_name": "Central_Monday_API_TOKEN"
-  }
-]
-```
-
-Worker code should read the token from the Worker environment binding:
-
-```js
-env.MONDAY_API_TOKEN
-```
-
-For local CLI runs, keep using the environment variable with the same name:
+For local CLI runs, keep using the environment variable:
 
 ```bash
 export MONDAY_API_TOKEN="your-token"
@@ -65,14 +45,36 @@ export MONDAY_API_TOKEN="your-token"
 
 ## Deploy Worker
 
+Set the shared scraper token in this project and in the NH Ecosystem Worker
+project. Both Workers must use the same value:
+
+```bash
+npx wrangler secret put SCRAPER_API_TOKEN
+```
+
+Manual Worker runs are disabled unless you set a separate admin token:
+
+```bash
+npx wrangler secret put SCRAPER_ADMIN_TOKEN
+```
+
+Then deploy:
+
 ```bash
 npm install
 npm run deploy
 ```
 
 The Worker is deployed as `parter-event-scraper` and configured in
-`wrangler.jsonc` to run daily at `13:00 UTC`. You can also manually trigger it
-by sending a `POST` request to the deployed Worker.
+`wrangler.jsonc` to run daily at `13:00 UTC`. It uses
+`ECOSYSTEM_BASE_URL=https://nhsolidarityecosystem.com`.
+
+With `SCRAPER_ADMIN_TOKEN` set, you can manually trigger it with:
+
+```bash
+curl -X POST https://parter-event-scraper.randall-d53.workers.dev \
+  -H "Authorization: Bearer $SCRAPER_ADMIN_TOKEN"
+```
 
 The default partner list lives in `partners.yaml`. Add new partners there and choose the parser that best matches the site:
 
