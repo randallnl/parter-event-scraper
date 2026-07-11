@@ -356,7 +356,7 @@ function parseShopifyBlogEvents(html, partner) {
     }
     seenUrls.add(url);
 
-    const context = nearbyHtml(html, match.index, 2200);
+    const context = shopifyCardHtml(html, match.index) || nearbyHtml(html, match.index, 1200);
     const title = shopifyArticleTitle(match[0], match[2], context);
     if (!title || title.toLowerCase() === "view all") {
       continue;
@@ -574,6 +574,21 @@ function followingHtml(html, headings, index, limit) {
 
 function nearbyHtml(html, index, radius) {
   return html.slice(Math.max(0, index - radius), Math.min(html.length, index + radius));
+}
+
+function shopifyCardHtml(html, index) {
+  const before = html.slice(0, index);
+  const wrapperPattern = /<div\b[^>]*class=["'][^"']*(?:\barticle-card-wrapper\b|\bcard-wrapper\b)[^"']*["'][^>]*>/gi;
+  const wrappers = [...before.matchAll(wrapperPattern)];
+  const start = wrappers.at(-1)?.index;
+  if (start === undefined) {
+    return "";
+  }
+
+  const after = html.slice(index);
+  const next = after.match(wrapperPattern);
+  const end = next?.index ? index + next.index : Math.min(html.length, index + 2400);
+  return html.slice(start, end);
 }
 
 function firstHref(html) {
