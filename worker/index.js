@@ -57,7 +57,8 @@ async function scrapeAndImport(env) {
       }
 
       const html = await response.text();
-      records.push(...parsePartner(html, partner));
+      const partnerRecords = parsePartner(html, partner);
+      records.push(...(await enrichBlogRecords(partnerRecords, partner)));
     } catch (error) {
       failures.push({
         partner: partner.name,
@@ -384,6 +385,83 @@ function parseShopifyBlogEvents(html, partner) {
   return records;
 }
 
+async function enrichBlogRecords(records, partner) {
+  if (!shouldFetchDetailPages(partner)) {
+    return records;
+  }
+
+  const enriched = [];
+  for (const record of records) {
+    enriched.push(await enrichBlogRecord(record));
+  }
+  return enriched;
+}
+
+function shouldFetchDetailPages(partner) {
+  return new Set([
+    "shopify_blog_events",
+    "squarespace_blog",
+    "wordpress_posts",
+  ]).has(partner.parser);
+}
+
+async function enrichBlogRecord(record) {
+  try {
+    const response = await fetch(record.url, {
+      headers: {
+        "User-Agent": "NH-Ecosystem-Event-Scraper/1.0",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Detail page returned ${response.status}`);
+    }
+
+    const html = stripIgnoredHtml(await response.text());
+    const details = articleDetails(html, record.url);
+    if (!details.description && !details.imageUrl) {
+      return record;
+    }
+
+    const dateText = firstPostDate(details.description);
+    const timeRange = parseTimeRange(details.description);
+    return {
+      ...record,
+      startDate: normalizeDate(dateText) || record.startDate,
+      endDate: secondLongDate(details.description) || record.endDate,
+      startTime: timeRange.startTime || record.startTime,
+      endTime: timeRange.endTime || record.endTime,
+      location: locationFromText(details.description) || record.location,
+      description: details.description || record.description,
+      imageUrl: details.imageUrl || record.imageUrl,
+    };
+  } catch (error) {
+    console.error(`Could not enrich ${record.url}: ${error.message}`);
+    return record;
+  }
+}
+
+function articleDetails(html, baseUrl) {
+  const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html;
+  const contentBlocks = [
+    ...main.matchAll(/<div\b[^>]*class=["'][^"']*\b(?:content-main|rte)\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi),
+  ]
+    .map((match) => textFromHtml(match[1]))
+    .filter(Boolean);
+  const uniqueBlocks = [...new Set(contentBlocks)];
+  const description = uniqueBlocks.length
+    ? shorten(uniqueBlocks.join("\n\n"), 4000)
+    : metaContent(html, "description");
+  const imageUrl =
+    metaContent(html, "og:image:secure_url") ||
+    metaContent(html, "og:image") ||
+    firstImageUrl(main, baseUrl);
+
+  return {
+    description,
+    imageUrl: imageUrl ? absoluteUrl(imageUrl, baseUrl) : "",
+  };
+}
+
 function toImportRecord(record) {
   return {
     partner: record.partner,
@@ -500,6 +578,15 @@ function nearbyHtml(html, index, radius) {
 
 function firstHref(html) {
   return html.match(/href=["']([^"']+)["']/i)?.[1] || "";
+}
+
+function metaContent(html, name) {
+  const escaped = escapeRegExp(name);
+  return (
+    html.match(new RegExp(`<meta\\b[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']+)["']`, "i"))?.[1] ||
+    html.match(new RegExp(`<meta\\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']${escaped}["']`, "i"))?.[1] ||
+    ""
+  );
 }
 
 function firstImageUrl(html, baseUrl) {
