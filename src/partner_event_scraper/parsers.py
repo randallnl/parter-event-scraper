@@ -50,7 +50,8 @@ def squarespace_events(
         if not title or len(title) > 180 or title.lower() in {"upcoming events", "past events"}:
             continue
 
-        block = collect_until_next_heading(heading)
+        article = find_eventlist_article(heading)
+        block = [article] if article else collect_until_next_heading(heading)
         block_text = clean_text(" ".join(node.get_text(" ") for node in block if isinstance(node, Tag)))
         date_match = DATE_RE.search(block_text)
         if not date_match:
@@ -256,6 +257,14 @@ def collect_until_next_heading(start: Tag, max_nodes: int = 12) -> list[Tag]:
         if len(nodes) >= max_nodes:
             break
     return nodes
+
+
+def find_eventlist_article(node: Tag) -> Tag | None:
+    article = node.find_parent("article")
+    if not isinstance(article, Tag):
+        return None
+    classes = article.get("class", [])
+    return article if "eventlist-event" in classes else None
 
 
 def clean_text(text: str) -> str:

@@ -28,6 +28,37 @@ def test_squarespace_events_extracts_event_fields():
     assert records[0].url == "https://example.org/events/sample"
 
 
+def test_squarespace_events_uses_image_from_same_event_article():
+    html = """
+    <article class="eventlist-event eventlist-event--hasimg">
+      <a href="/events/first" class="eventlist-column-thumbnail">
+        <img src="https://images.example.org/first.png" alt="First Event">
+      </a>
+      <h1 class="eventlist-title"><a href="/events/first">First Event</a></h1>
+      <ul><li>Sunday, July 12, 2026</li><li>10:00 AM 11:00 AM</li></ul>
+    </article>
+    <article class="eventlist-event eventlist-event--hasimg">
+      <a href="/events/second" class="eventlist-column-thumbnail">
+        <img src="https://images.example.org/second.png" alt="Second Event">
+      </a>
+      <h1 class="eventlist-title"><a href="/events/second">Second Event</a></h1>
+      <ul><li>Monday, July 13, 2026</li><li>1:00 PM 2:00 PM</li></ul>
+    </article>
+    """
+    partner = {
+        "name": "Example",
+        "url": "https://example.org/events",
+        "parser": "squarespace_events",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-07-02T12:00:00+00:00")
+
+    assert [record.title for record in records] == ["First Event", "Second Event"]
+    assert records[0].image_url == "https://images.example.org/first.png"
+    assert records[1].image_url == "https://images.example.org/second.png"
+
+
 def test_heading_date_events_uses_nearest_date_heading():
     html = """
     <p>August 8, 2026</p>

@@ -172,7 +172,8 @@ function parseSquarespaceEvents(html, partner) {
     }
 
     const nextIndex = headings[index + 1]?.index ?? html.length;
-    const block = html.slice(heading.index + heading.raw.length, nextIndex);
+    const article = squarespaceEventArticleHtml(html, heading.index);
+    const block = article || html.slice(heading.index + heading.raw.length, nextIndex);
     const blockText = textFromHtml(block);
     const dateText = firstLongDate(blockText);
     if (!dateText) {
@@ -589,6 +590,23 @@ function shopifyCardHtml(html, index) {
   const next = after.match(wrapperPattern);
   const end = next?.index ? index + next.index : Math.min(html.length, index + 2400);
   return html.slice(start, end);
+}
+
+function squarespaceEventArticleHtml(html, index) {
+  const before = html.slice(0, index);
+  const articlePattern = /<article\b[^>]*class=["'][^"']*\beventlist-event\b[^"']*["'][^>]*>/gi;
+  const articles = [...before.matchAll(articlePattern)];
+  const start = articles.at(-1)?.index;
+  if (start === undefined) {
+    return "";
+  }
+
+  const endMatch = html.slice(index).match(/<\/article>/i);
+  if (!endMatch) {
+    return "";
+  }
+
+  return html.slice(start, index + endMatch.index + endMatch[0].length);
 }
 
 function firstHref(html) {
