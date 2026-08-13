@@ -4,7 +4,10 @@
   "main": "worker/index.js",
   "compatibility_date": "2026-07-02",
   "vars": {
-    "ECOSYSTEM_BASE_URL": "https://nhsolidarityecosystem.com"
+    "ECOSYSTEM_BASE_URL": "https://soqnh-online.randall-d53.workers.dev"
+  },
+  "secrets": {
+    "required": ["SCRAPER_API_TOKEN", "SCRAPER_ADMIN_TOKEN"]
   },
   "triggers": {
     "crons": ["0 13 * * *"]
