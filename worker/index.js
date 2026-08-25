@@ -83,7 +83,7 @@ async function scrapeAndImport(env) {
 }
 
 async function fetchPartners(env) {
-  const response = await fetch(
+  const response = await env.SOQNH_ONLINE.fetch(
     `${ecosystemBaseUrl(env)}/api/scraper/organizations`,
     {
       headers: {
@@ -119,16 +119,19 @@ async function importEventsInChunks(env, records) {
 }
 
 async function importEvents(env, records) {
-  const response = await fetch(`${ecosystemBaseUrl(env)}/api/scraper/events`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${await scraperApiToken(env)}`,
-      "Content-Type": "application/json",
+  const response = await env.SOQNH_ONLINE.fetch(
+    `${ecosystemBaseUrl(env)}/api/scraper/events`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${await scraperApiToken(env)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        records: records.map(toImportRecord),
+      }),
     },
-    body: JSON.stringify({
-      records: records.map(toImportRecord),
-    }),
-  });
+  );
 
   if (!response.ok) {
     throw new Error(

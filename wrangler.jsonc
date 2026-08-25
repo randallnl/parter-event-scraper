@@ -9,6 +9,12 @@
   "secrets": {
     "required": ["SCRAPER_API_TOKEN", "SCRAPER_ADMIN_TOKEN"]
   },
+  "services": [
+    {
+      "binding": "SOQNH_ONLINE",
+      "service": "soqnh-online"
+    }
+  ],
   "triggers": {
     "crons": ["0 13 * * *"]
   }

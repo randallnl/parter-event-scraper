@@ -67,7 +67,9 @@ npm run deploy
 
 The Worker is deployed as `parter-event-scraper` and configured in
 `wrangler.jsonc` to run daily at `13:00 UTC`. It uses
-`ECOSYSTEM_BASE_URL=https://nhsolidarityecosystem.com`.
+`ECOSYSTEM_BASE_URL=https://soqnh-online.randall-d53.workers.dev` as the
+canonical request URL and calls that Worker through the `SOQNH_ONLINE` service
+binding.
 
 With `SCRAPER_ADMIN_TOKEN` set, you can manually trigger it with:
 
