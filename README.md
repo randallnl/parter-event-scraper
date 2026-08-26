@@ -78,6 +78,19 @@ curl -X POST https://parter-event-scraper.randall-d53.workers.dev \
   -H "Authorization: Bearer $SCRAPER_ADMIN_TOKEN"
 ```
 
+## Test Partner URLs
+
+Open the parser workspace to test partner-submitted URLs without importing
+anything:
+
+```text
+https://parter-event-scraper.randall-d53.workers.dev/workspace
+```
+
+Paste the URL, choose a parser, enter `SCRAPER_ADMIN_TOKEN`, and submit. The
+workspace shows record previews plus the exact `records` payload that would be
+sent to NH Ecosystem.
+
 The default partner list lives in `partners.yaml`. Add new partners there and choose the parser that best matches the site:
 
 - `squarespace_events`: dated event listings with event titles, calendar links, and "View Event" links.

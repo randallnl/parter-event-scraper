@@ -8,8 +8,16 @@ export default {
       return Response.json({ ok: true });
     }
 
+    if (request.method === "GET" && url.pathname === "/workspace") {
+      return workspaceResponse();
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/parse-url") {
+      return parseUrlWorkspaceRequest(request, env);
+    }
+
     if (request.method !== "POST") {
-      return new Response("POST to run the event scraper.", {
+      return new Response("POST to run the event scraper, or GET /workspace.", {
         status: 405,
         headers: { Allow: "POST" },
       });
@@ -38,6 +46,345 @@ export default {
     );
   },
 };
+
+async function parseUrlWorkspaceRequest(request, env) {
+  const authError = await validateManualRun(request, env);
+  if (authError) {
+    return authError;
+  }
+
+  try {
+    const input = await request.json();
+    const partner = workspacePartner(input);
+    const response = await fetch(partner.url, {
+      headers: {
+        "User-Agent": "NH-Ecosystem-Event-Scraper/1.0",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Source returned ${response.status}`);
+    }
+
+    const html = await response.text();
+    const parsedRecords = parsePartner(html, partner);
+    const records = input.include_details === false
+      ? parsedRecords
+      : await enrichBlogRecords(parsedRecords, partner);
+    const deduped = deduplicate(records).sort((a, b) =>
+      (a.startDate || "").localeCompare(b.startDate || ""),
+    );
+
+    return Response.json({
+      ok: true,
+      partner,
+      fetched_bytes: html.length,
+      records: deduped,
+      import_payload: {
+        records: deduped.map(toImportRecord),
+      },
+    });
+  } catch (error) {
+    return Response.json(
+      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 400 },
+    );
+  }
+}
+
+function workspacePartner(input) {
+  const url = String(input.url || "").trim();
+  const parser = String(input.parser || "").trim();
+  const parsedUrl = new URL(url);
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error("URL must start with http:// or https://.");
+  }
+  if (!parser) {
+    throw new Error("Choose a parser.");
+  }
+
+  return {
+    name: String(input.name || parsedUrl.hostname).trim(),
+    url: parsedUrl.toString(),
+    parser,
+    kind: String(input.kind || "event").trim() || "event",
+  };
+}
+
+function workspaceResponse() {
+  return new Response(workspaceHtml(), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function workspaceHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner URL Parser Workspace</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --ink: #1e2422;
+      --muted: #62706b;
+      --line: #d8ddd7;
+      --accent: #1f6f68;
+      --accent-2: #9a5b2f;
+      --error: #9e2f2f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header {
+      padding: 20px 24px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 0; }
+    header p { margin: 0; color: var(--muted); max-width: 860px; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+      gap: 16px;
+      padding: 16px;
+    }
+    form, .results, .record {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    form { padding: 16px; align-self: start; position: sticky; top: 16px; }
+    label { display: block; margin: 0 0 12px; font-weight: 650; }
+    input, select, textarea, button {
+      width: 100%;
+      margin-top: 5px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 11px;
+      font: inherit;
+      background: white;
+      color: var(--ink);
+    }
+    textarea { min-height: 74px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .check input { width: auto; margin: 0; }
+    button {
+      margin-top: 8px;
+      border-color: var(--accent);
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .58; cursor: progress; }
+    .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+    .results { padding: 16px; min-height: 300px; overflow: hidden; }
+    .summary {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      color: var(--muted);
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: #fafbf9;
+    }
+    .error { color: var(--error); font-weight: 650; }
+    .record { margin: 12px 0; padding: 12px; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
+    .record img {
+      width: 120px;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #eef1ed;
+    }
+    .no-image {
+      display: grid;
+      place-items: center;
+      width: 120px;
+      height: 120px;
+      border-radius: 6px;
+      border: 1px dashed var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    h2 { margin: 0 0 6px; font-size: 17px; }
+    .meta { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .desc {
+      max-height: 8.8em;
+      overflow: auto;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+      white-space: pre-wrap;
+    }
+    details { margin-top: 14px; }
+    pre {
+      overflow: auto;
+      background: #202522;
+      color: #edf2ee;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      form { position: static; }
+      .record { grid-template-columns: 1fr; }
+      .record img, .no-image { width: 100%; height: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Partner URL Parser Workspace</h1>
+    <p>Paste a partner URL, choose the parser you want to test, and inspect the normalized records without importing them.</p>
+  </header>
+  <main>
+    <form id="parser-form">
+      <label>Admin token
+        <input id="admin-token" type="password" autocomplete="off" placeholder="SCRAPER_ADMIN_TOKEN">
+      </label>
+      <label>Partner URL
+        <textarea id="url" required placeholder="https://queerlective.com/blogs/upcoming-events"></textarea>
+      </label>
+      <div class="row">
+        <label>Parser
+          <select id="parser" required>
+            <option value="shopify_blog_events">shopify_blog_events</option>
+            <option value="squarespace_events">squarespace_events</option>
+            <option value="heading_date_events">heading_date_events</option>
+            <option value="squarespace_blog">squarespace_blog</option>
+            <option value="wordpress_posts">wordpress_posts</option>
+            <option value="generic_links">generic_links</option>
+          </select>
+        </label>
+        <label>Kind
+          <select id="kind">
+            <option value="event">event</option>
+            <option value="announcement">announcement</option>
+          </select>
+        </label>
+      </div>
+      <label>Partner name
+        <input id="name" placeholder="Optional; defaults to hostname">
+      </label>
+      <label class="check">
+        <input id="include-details" type="checkbox" checked>
+        Fetch full blog/article detail pages
+      </label>
+      <button id="submit" type="submit">Parse URL</button>
+      <p class="hint">The token is only sent as a bearer token to this Worker. Results are not imported into NH Ecosystem.</p>
+    </form>
+    <section class="results" id="results">
+      <div class="summary"><span class="pill">Ready</span></div>
+      <p class="hint">Parsed records will appear here, followed by the exact import payload JSON.</p>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector("#parser-form");
+    const results = document.querySelector("#results");
+    const button = document.querySelector("#submit");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      results.innerHTML = '<div class="summary"><span class="pill">Parsing...</span></div>';
+      const token = document.querySelector("#admin-token").value.trim();
+      const body = {
+        url: document.querySelector("#url").value.trim(),
+        parser: document.querySelector("#parser").value,
+        kind: document.querySelector("#kind").value,
+        name: document.querySelector("#name").value.trim(),
+        include_details: document.querySelector("#include-details").checked,
+      };
+
+      try {
+        const response = await fetch("/api/parse-url", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Parse failed");
+        renderResults(data);
+      } catch (error) {
+        results.innerHTML = '<p class="error">' + escapeHtml(error.message) + '</p>';
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function renderResults(data) {
+      const records = data.import_payload.records;
+      results.innerHTML = [
+        '<div class="summary">',
+        '<span class="pill">' + records.length + ' records</span>',
+        '<span class="pill">' + data.fetched_bytes + ' bytes fetched</span>',
+        '<span class="pill">' + escapeHtml(data.partner.parser) + '</span>',
+        '</div>',
+        records.map(renderRecord).join(''),
+        '<details open><summary>Import payload JSON</summary><pre>' + escapeHtml(JSON.stringify(data.import_payload, null, 2)) + '</pre></details>',
+        '<details><summary>Raw parser records</summary><pre>' + escapeHtml(JSON.stringify(data.records, null, 2)) + '</pre></details>',
+      ].join('');
+    }
+
+    function renderRecord(record) {
+      const image = record.image_url
+        ? '<img src="' + escapeHtml(record.image_url) + '" alt="">'
+        : '<div class="no-image">No image</div>';
+      return '<article class="record">' +
+        image +
+        '<div>' +
+          '<h2>' + escapeHtml(record.title || '(untitled)') + '</h2>' +
+          '<div class="meta">' +
+            escapeHtml([record.start_date, record.start_time, record.location].filter(Boolean).join(' | ')) +
+          '</div>' +
+          '<div class="meta"><a href="' + escapeHtml(record.url) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.url) + '</a></div>' +
+          '<div class="desc">' + escapeHtml(record.description || '') + '</div>' +
+        '</div>' +
+      '</article>';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[char]);
+    }
+  </script>
+</body>
+</html>`;
+}
 
 async function scrapeAndImport(env) {
   const partners = await fetchPartners(env);
