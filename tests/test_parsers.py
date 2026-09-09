@@ -144,3 +144,74 @@ def test_shopify_blog_events_extracts_all_blog_cards_as_events():
     assert records[1].start_date == "2026-07-19"
     assert records[2].start_date == "2026-07-10"
     assert all(record.kind == "event" for record in records)
+
+
+def test_embedded_calendar_extracts_squarespace_collection_events():
+    html = """
+    <iframe src="/calendar-events"></iframe>
+    <article class="eventlist-event">
+      <h1 class="eventlist-title"><a href="/calendar-events/drop-in">Wednesday Drop-In</a></h1>
+      <ul>
+        <li>Wednesday, September 16, 2026</li>
+        <li>4:00 PM 6:00 PM</li>
+        <li>Portsmouth Community Campus (map)</li>
+        <li>Google Calendar ICS</li>
+      </ul>
+      <p>Weekly open hangout for LGBTQ+ youth grades 7-12.</p>
+    </article>
+    """
+    partner = {
+        "name": "New Hampshire Outright",
+        "url": "https://www.nhoutright.org/calendar",
+        "parser": "embedded_calendar",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-09-08T12:00:00+00:00")
+
+    assert len(records) == 1
+    assert records[0].title == "Wednesday Drop-In"
+    assert records[0].start_date == "2026-09-16"
+    assert records[0].start_time == "4:00 PM".upper()
+    assert records[0].end_time == "6:00 PM".upper()
+    assert records[0].url == "https://www.nhoutright.org/calendar-events/drop-in"
+
+
+def test_embedded_calendar_extracts_json_ld_events():
+    html = """
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Event",
+        "name": "Community Supper",
+        "startDate": "2026-10-02T18:30:00-04:00",
+        "endDate": "2026-10-02T20:00:00-04:00",
+        "description": "Dinner and conversation.",
+        "image": "/images/supper.jpg",
+        "url": "/events/supper",
+        "location": {
+          "name": "Town Hall",
+          "address": {
+            "streetAddress": "1 Main St",
+            "addressLocality": "Concord",
+            "addressRegion": "NH"
+          }
+        }
+      }
+    </script>
+    """
+    partner = {
+        "name": "Example",
+        "url": "https://example.org/calendar",
+        "parser": "embedded_calendar",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-09-08T12:00:00+00:00")
+
+    assert len(records) == 1
+    assert records[0].title == "Community Supper"
+    assert records[0].start_date == "2026-10-02"
+    assert records[0].start_time == "18:30"
+    assert records[0].image_url == "https://example.org/images/supper.jpg"
+    assert records[0].location == "Town Hall | 1 Main St, Concord, NH"

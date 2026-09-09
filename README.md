@@ -99,6 +99,7 @@ The default partner list lives in `partners.yaml`. Add new partners there and ch
 - `wordpress_posts`: WordPress category/archive post listings.
 - `generic_links`: fallback that records dated links from simple pages.
 - `shopify_blog_events`: Shopify blog listings where every article should be imported as an event.
+- `embedded_calendar`: calendar pages that load events from an iframe, feed, JSON-LD, ICS file, or a linked Squarespace-style event collection.
 
 ## Output Fields
 

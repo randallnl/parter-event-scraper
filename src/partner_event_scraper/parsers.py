@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -32,7 +33,8 @@ MONTH_YEAR_RE = re.compile(
 
 def parse_html(html: str, partner: dict, scraped_at: str) -> list[EventRecord]:
     soup = BeautifulSoup(html, "html.parser")
-    for selector in ("script", "style", "noscript", "svg"):
+    ignored = ("style", "noscript", "svg") if partner["parser"] == "embedded_calendar" else ("script", "style", "noscript", "svg")
+    for selector in ignored:
         for node in soup.select(selector):
             node.decompose()
 
@@ -247,6 +249,98 @@ def shopify_blog_events(
         )
 
 
+def embedded_calendar(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    yield from squarespace_events(soup, partner, scraped_at)
+    yield from heading_date_events(soup, partner, scraped_at)
+    yield from generic_links(soup, partner, scraped_at)
+    yield from json_ld_events(soup, partner, scraped_at)
+
+
+def json_ld_events(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    source_url = partner["url"]
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or script.get_text())
+        except json.JSONDecodeError:
+            continue
+
+        for event in json_ld_event_nodes(data):
+            title = clean_text(str(event.get("name") or event.get("headline") or ""))
+            start = str(event.get("startDate") or event.get("datePublished") or "")
+            start_date, start_time = date_time_parts(start)
+            if not title or not start_date:
+                continue
+            end_date, end_time = date_time_parts(str(event.get("endDate") or ""))
+            yield EventRecord(
+                partner=partner["name"],
+                title=title,
+                start_date=start_date,
+                end_date=end_date,
+                start_time=start_time,
+                end_time=end_time,
+                location=json_ld_location(event.get("location")),
+                description=shorten(clean_text(str(event.get("description") or "")), 1200),
+                image_url=json_ld_image(event.get("image"), source_url),
+                url=urljoin(source_url, str(event.get("url") or source_url)),
+                source_url=source_url,
+                kind=partner.get("kind", "event"),
+                scraped_at=scraped_at,
+            )
+
+
+def json_ld_event_nodes(value: object) -> list[dict]:
+    if isinstance(value, list):
+        return [event for item in value for event in json_ld_event_nodes(item)]
+    if not isinstance(value, dict):
+        return []
+
+    types = value.get("@type", [])
+    if isinstance(types, str):
+        types = [types]
+    events = [value] if any(str(item).lower() == "event" for item in types) else []
+    events.extend(json_ld_event_nodes(value.get("@graph")))
+    events.extend(json_ld_event_nodes(value.get("itemListElement")))
+    return events
+
+
+def json_ld_location(location: object) -> str:
+    if not location:
+        return ""
+    if isinstance(location, str):
+        return clean_text(location)
+    if isinstance(location, list):
+        return "; ".join(filter(None, [json_ld_location(item) for item in location]))
+    if not isinstance(location, dict):
+        return ""
+
+    address = location.get("address", "")
+    if isinstance(address, dict):
+        address_text = ", ".join(
+            str(address.get(key, ""))
+            for key in ("streetAddress", "addressLocality", "addressRegion", "postalCode")
+            if address.get(key)
+        )
+    else:
+        address_text = str(address)
+    return clean_text(" | ".join(filter(None, [str(location.get("name", "")), address_text])))
+
+
+def json_ld_image(image: object, source_url: str) -> str:
+    if not image:
+        return ""
+    if isinstance(image, str):
+        return urljoin(source_url, image)
+    if isinstance(image, list):
+        return json_ld_image(image[0], source_url) if image else ""
+    if isinstance(image, dict) and image.get("url"):
+        return urljoin(source_url, str(image["url"]))
+    return ""
+
+
 def collect_until_next_heading(start: Tag, max_nodes: int = 12) -> list[Tag]:
     nodes: list[Tag] = []
     for sibling in start.next_siblings:
@@ -348,11 +442,21 @@ def full_date_from_text(text: str) -> str:
 
 
 def normalize_date(text: str) -> str:
+    date, _time = date_time_parts(text)
+    if date:
+        return date
+
     parsed = dateparser.parse(
         text,
         settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": datetime(2026, 1, 1)},
     )
     return parsed.date().isoformat() if parsed else ""
+
+
+def date_time_parts(value: str) -> tuple[str, str]:
+    if match := re.match(r"^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}))?", value):
+        return match.group(1), match.group(2) or ""
+    return "", ""
 
 
 def parse_end_date(text: str, start_date: str) -> str:
@@ -408,4 +512,5 @@ PARSERS: dict[str, Callable[[BeautifulSoup, dict, str], Iterable[EventRecord]]] 
     "wordpress_posts": wordpress_posts,
     "generic_links": generic_links,
     "shopify_blog_events": shopify_blog_events,
+    "embedded_calendar": embedded_calendar,
 }

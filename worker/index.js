@@ -67,7 +67,7 @@ async function parseUrlWorkspaceRequest(request, env) {
     }
 
     const html = await response.text();
-    const parsedRecords = parsePartner(html, partner);
+    const parsedRecords = await parsePartner(html, partner);
     const records = input.include_details === false
       ? parsedRecords
       : await enrichBlogRecords(parsedRecords, partner);
@@ -274,6 +274,7 @@ function workspaceHtml() {
       <div class="row">
         <label>Parser
           <select id="parser" required>
+            <option value="embedded_calendar">embedded_calendar</option>
             <option value="shopify_blog_events">shopify_blog_events</option>
             <option value="squarespace_events">squarespace_events</option>
             <option value="heading_date_events">heading_date_events</option>
@@ -404,7 +405,7 @@ async function scrapeAndImport(env) {
       }
 
       const html = await response.text();
-      const partnerRecords = parsePartner(html, partner);
+      const partnerRecords = await parsePartner(html, partner);
       records.push(...(await enrichBlogRecords(partnerRecords, partner)));
     } catch (error) {
       failures.push({
@@ -489,7 +490,7 @@ async function importEvents(env, records) {
   return response.json();
 }
 
-function parsePartner(html, partner) {
+async function parsePartner(html, partner) {
   const cleanHtml = stripIgnoredHtml(html);
 
   switch (partner.parser) {
@@ -505,9 +506,82 @@ function parsePartner(html, partner) {
       return parseWordPressPosts(cleanHtml, partner);
     case "shopify_blog_events":
       return parseShopifyBlogEvents(cleanHtml, partner);
+    case "embedded_calendar":
+      return parseEmbeddedCalendar(html, cleanHtml, partner);
     default:
       throw new Error(`Unsupported parser: ${partner.parser}`);
   }
+}
+
+async function parseEmbeddedCalendar(rawHtml, cleanHtml, partner) {
+  const records = [
+    ...parseCalendarLikeHtml(cleanHtml, partner),
+    ...parseJsonLdEvents(rawHtml, partner),
+  ];
+  const candidates = embeddedCalendarUrls(rawHtml, partner.url);
+
+  for (const url of candidates.slice(0, 6)) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "NH-Ecosystem-Event-Scraper/1.0",
+          Accept: "text/html,application/xhtml+xml,application/xml,text/calendar,*/*",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Embedded source returned ${response.status}`);
+      }
+
+      const body = await response.text();
+      if (/BEGIN:VCALENDAR/i.test(body)) {
+        records.push(...parseIcsEvents(body, partner, url));
+      } else {
+        const childHtml = stripIgnoredHtml(body);
+        records.push(...parseCalendarLikeHtml(childHtml, { ...partner, url }));
+        records.push(...parseJsonLdEvents(body, { ...partner, url }));
+      }
+    } catch (error) {
+      console.error(`Could not parse embedded calendar ${url}: ${error.message}`);
+    }
+  }
+
+  return deduplicate(records);
+}
+
+function parseCalendarLikeHtml(html, partner) {
+  return [
+    ...parseSquarespaceEvents(html, partner),
+    ...parseHeadingDateEvents(html, partner),
+    ...parseGenericLinks(html, partner),
+  ];
+}
+
+function embeddedCalendarUrls(html, sourceUrl) {
+  const urls = new Set();
+  const source = new URL(sourceUrl);
+  const attrRegex = /\b(?:src|href|data-src)=["']([^"']+)["']/gi;
+
+  for (const match of html.matchAll(attrRegex)) {
+    const value = decodeHtmlAttribute(match[1]);
+    if (!isCalendarCandidate(value)) {
+      continue;
+    }
+    urls.add(absoluteUrl(value, sourceUrl));
+  }
+
+  if (/\/calendar\/?$/i.test(source.pathname)) {
+    urls.add(new URL("/calendar-events", source.origin).toString());
+    urls.add(new URL("/events", source.origin).toString());
+  }
+
+  return [...urls].filter((url) => {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol);
+  });
+}
+
+function isCalendarCandidate(value) {
+  return /(?:calendar|event|events|ical|ics|tockify|trumba|localist|eventbrite|google\.com\/calendar)/i.test(value);
 }
 
 function parseSquarespaceEvents(html, partner) {
@@ -813,6 +887,168 @@ function articleDetails(html, baseUrl) {
   };
 }
 
+function parseJsonLdEvents(html, partner) {
+  const records = [];
+  const scripts = html.matchAll(
+    /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  );
+
+  for (const script of scripts) {
+    try {
+      const data = JSON.parse(textFromHtml(script[1]));
+      for (const event of jsonLdEventNodes(data)) {
+        const title = cleanText(event.name || event.headline || "");
+        const start = String(event.startDate || event.datePublished || "");
+        if (!title || !start) {
+          continue;
+        }
+        const startParts = datePartsFromDateTime(start);
+        const endParts = datePartsFromDateTime(String(event.endDate || ""));
+        records.push({
+          partner: partner.name,
+          title,
+          startDate: startParts.date,
+          endDate: endParts.date,
+          startTime: startParts.time,
+          endTime: endParts.time,
+          location: jsonLdLocation(event.location),
+          description: shorten(cleanText(event.description || ""), 1200),
+          imageUrl: jsonLdImage(event.image, partner.url),
+          url: absoluteUrl(event.url || partner.url, partner.url),
+          sourceUrl: partner.url,
+          kind: partner.kind || "event",
+          scrapedAt: new Date().toISOString(),
+        });
+      }
+    } catch (_error) {
+      // Some sites include multiple JSON-LD blobs; a malformed blob should not kill the page.
+    }
+  }
+
+  return records;
+}
+
+function jsonLdEventNodes(value) {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(jsonLdEventNodes);
+  }
+  if (typeof value !== "object") {
+    return [];
+  }
+  const type = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
+  const events = type.some((item) => String(item).toLowerCase() === "event") ? [value] : [];
+  return [
+    ...events,
+    ...jsonLdEventNodes(value["@graph"]),
+    ...jsonLdEventNodes(value.itemListElement),
+  ];
+}
+
+function jsonLdLocation(location) {
+  if (!location) {
+    return "";
+  }
+  if (typeof location === "string") {
+    return cleanText(location);
+  }
+  if (Array.isArray(location)) {
+    return location.map(jsonLdLocation).filter(Boolean).join("; ");
+  }
+  const address = location.address || {};
+  const addressText = typeof address === "string"
+    ? address
+    : [
+        address.streetAddress,
+        address.addressLocality,
+        address.addressRegion,
+        address.postalCode,
+      ].filter(Boolean).join(", ");
+  return cleanText([location.name, addressText].filter(Boolean).join(" | "));
+}
+
+function jsonLdImage(image, baseUrl) {
+  if (!image) {
+    return "";
+  }
+  if (typeof image === "string") {
+    return absoluteUrl(image, baseUrl);
+  }
+  if (Array.isArray(image)) {
+    return jsonLdImage(image[0], baseUrl);
+  }
+  return image.url ? absoluteUrl(image.url, baseUrl) : "";
+}
+
+function parseIcsEvents(calendarText, partner, sourceUrl) {
+  const records = [];
+  const unfolded = calendarText.replace(/\r?\n[ \t]/g, "");
+  const eventBlocks = unfolded.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/gi) || [];
+
+  for (const block of eventBlocks) {
+    const title = cleanText(icsValue(block, "SUMMARY"));
+    const start = icsDateParts(icsValue(block, "DTSTART"));
+    if (!title || !start.date) {
+      continue;
+    }
+    const end = icsDateParts(icsValue(block, "DTEND"));
+    const url = icsValue(block, "URL") || sourceUrl;
+    const description = icsValue(block, "DESCRIPTION");
+    records.push({
+      partner: partner.name,
+      title,
+      startDate: start.date,
+      endDate: end.date,
+      startTime: start.time,
+      endTime: end.time,
+      location: cleanText(icsValue(block, "LOCATION")),
+      description: shorten(description, 1200),
+      imageUrl: icsImageUrl(block, sourceUrl),
+      url: absoluteUrl(url, sourceUrl),
+      sourceUrl,
+      kind: partner.kind || "event",
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  return records;
+}
+
+function icsValue(block, key) {
+  const escaped = escapeRegExp(key);
+  const match = block.match(new RegExp(`^${escaped}(?:;[^:\\r\\n]*)?:(.*)$`, "im"));
+  return match ? cleanText(decodeIcsText(match[1])) : "";
+}
+
+function icsDateParts(value) {
+  const dateTime = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+  if (dateTime) {
+    return {
+      date: `${dateTime[1]}-${dateTime[2]}-${dateTime[3]}`,
+      time: `${dateTime[4]}:${dateTime[5]}`,
+    };
+  }
+  const dateOnly = value.match(/^(\d{4})(\d{2})(\d{2})/);
+  return dateOnly
+    ? { date: `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`, time: "" }
+    : { date: normalizeDate(value), time: "" };
+}
+
+function icsImageUrl(block, sourceUrl) {
+  const attach = block.match(/^ATTACH(?:;[^:\r\n]*)?:(https?:\/\/\S+\.(?:jpe?g|png|webp|gif)[^\s]*)$/im);
+  return attach ? absoluteUrl(decodeIcsText(attach[1]), sourceUrl) : "";
+}
+
+function decodeIcsText(value) {
+  return value
+    .replace(/\\n/gi, " ")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\");
+}
+
 function toImportRecord(record) {
   return {
     partner: record.partner,
@@ -1033,6 +1269,15 @@ function textFromHtml(html) {
   );
 }
 
+function decodeHtmlAttribute(value) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function cleanText(text) {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -1088,6 +1333,11 @@ function longDatePattern(flags = "i") {
 }
 
 function normalizeDate(text) {
+  const dateTime = datePartsFromDateTime(text);
+  if (dateTime.date) {
+    return dateTime.date;
+  }
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
     return text;
   }
@@ -1107,6 +1357,11 @@ function normalizeDate(text) {
     }
   }
   return parsed.toISOString().slice(0, 10);
+}
+
+function datePartsFromDateTime(value) {
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}))?/);
+  return match ? { date: match[1], time: match[2] || "" } : { date: "", time: "" };
 }
 
 function parseTimeRange(text) {
