@@ -1,3 +1,5 @@
+import json
+
 from partner_event_scraper.parsers import parse_html
 
 
@@ -215,3 +217,49 @@ def test_embedded_calendar_extracts_json_ld_events():
     assert records[0].start_time == "18:30"
     assert records[0].image_url == "https://example.org/images/supper.jpg"
     assert records[0].location == "Town Hall | 1 Main St, Concord, NH"
+
+
+def test_mobilize_events_extracts_each_timeslot():
+    body = {
+        "data": [
+            {
+                "title": "Plymouth Pride Festival",
+                "description": "<p>Join community members for Pride.</p>",
+                "featured_image_url": "https://mobilizeamerica.imgix.net/uploads/event/pride.png",
+                "timezone": "America/New_York",
+                "browser_url": "https://www.mobilize.us/aclunh/event/950300/",
+                "is_virtual": False,
+                "location": {
+                    "venue": "Green Street",
+                    "address_lines": ["Green St", ""],
+                    "locality": "Plymouth",
+                    "region": "NH",
+                    "postal_code": "03264",
+                },
+                "timeslots": [
+                    {
+                        "start_date": 1790434800,
+                        "end_date": 1790452800,
+                    }
+                ],
+            }
+        ]
+    }
+    partner = {
+        "name": "ACLU NH",
+        "url": "https://www.mobilize.us/aclunh/",
+        "parser": "mobilize_events",
+        "kind": "event",
+    }
+
+    records = parse_html(json.dumps(body), partner, "2026-09-08T12:00:00+00:00")
+
+    assert len(records) == 1
+    assert records[0].title == "Plymouth Pride Festival"
+    assert records[0].start_date == "2026-09-26"
+    assert records[0].start_time == "11:00 AM"
+    assert records[0].end_time == "4:00 PM"
+    assert records[0].location == "Green Street, Green St, Plymouth, NH, 03264"
+    assert records[0].description == "Join community members for Pride."
+    assert records[0].image_url == "https://mobilizeamerica.imgix.net/uploads/event/pride.png"
+    assert records[0].url == "https://www.mobilize.us/aclunh/event/950300/"

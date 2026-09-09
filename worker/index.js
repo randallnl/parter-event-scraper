@@ -275,6 +275,7 @@ function workspaceHtml() {
         <label>Parser
           <select id="parser" required>
             <option value="embedded_calendar">embedded_calendar</option>
+            <option value="mobilize_events">mobilize_events</option>
             <option value="shopify_blog_events">shopify_blog_events</option>
             <option value="squarespace_events">squarespace_events</option>
             <option value="heading_date_events">heading_date_events</option>
@@ -508,9 +509,148 @@ async function parsePartner(html, partner) {
       return parseShopifyBlogEvents(cleanHtml, partner);
     case "embedded_calendar":
       return parseEmbeddedCalendar(html, cleanHtml, partner);
+    case "mobilize_events":
+      return parseMobilizeEvents(html, partner);
     default:
       throw new Error(`Unsupported parser: ${partner.parser}`);
   }
+}
+
+async function parseMobilizeEvents(html, partner) {
+  const organizationId = mobilizeOrganizationId(html, partner);
+  if (!organizationId) {
+    throw new Error("Could not find a Mobilize organization id in the page.");
+  }
+
+  const records = [];
+  let nextUrl = mobilizeEventsApiUrl(organizationId);
+  for (let page = 0; nextUrl && page < 4; page += 1) {
+    const response = await fetch(nextUrl, {
+      headers: {
+        "User-Agent": "NH-Ecosystem-Event-Scraper/1.0",
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Mobilize API returned ${response.status}`);
+    }
+
+    const body = await response.json();
+    records.push(...mobilizeRecords(body.data || [], partner));
+    nextUrl = typeof body.next === "string" ? body.next : "";
+  }
+
+  return deduplicate(records);
+}
+
+function mobilizeEventsApiUrl(organizationId) {
+  const url = new URL(`https://api.mobilize.us/v1/organizations/${organizationId}/events`);
+  url.searchParams.set("per_page", "100");
+  url.searchParams.set("timeslot_start", "gte_now");
+  return url.toString();
+}
+
+function mobilizeOrganizationId(html, partner) {
+  if (partner.mobilize_organization_id || partner.mobilizeOrganizationId) {
+    return String(partner.mobilize_organization_id || partner.mobilizeOrganizationId);
+  }
+
+  const slug = mobilizeSlug(partner.url);
+  if (!slug) {
+    return "";
+  }
+
+  const patterns = [
+    new RegExp(`"current_organization"\\s*:\\s*\\{[^}]*"id"\\s*:\\s*(\\d+)[^}]*"slug"\\s*:\\s*"${escapeRegExp(slug)}"`, "i"),
+    new RegExp(`"organization"\\s*:\\s*\\{[^}]*"id"\\s*:\\s*(\\d+)[^}]*"slug"\\s*:\\s*"${escapeRegExp(slug)}"`, "i"),
+    new RegExp(`"id"\\s*:\\s*(\\d+)[^{}]{0,600}"slug"\\s*:\\s*"${escapeRegExp(slug)}"`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+  return "";
+}
+
+function mobilizeSlug(url) {
+  try {
+    const parsed = new URL(url);
+    if (!/(^|\.)mobilize\.us$/i.test(parsed.hostname)) {
+      return "";
+    }
+    return parsed.pathname.split("/").filter(Boolean)[0] || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function mobilizeRecords(events, partner) {
+  const records = [];
+  for (const event of events) {
+    const timeslots = Array.isArray(event.timeslots) ? event.timeslots : [];
+    for (const timeslot of timeslots) {
+      const start = mobilizeDateTime(timeslot.start_date, event.timezone);
+      const end = mobilizeDateTime(timeslot.end_date, event.timezone);
+      if (!event.title || !start.date) {
+        continue;
+      }
+
+      records.push({
+        partner: partner.name,
+        title: cleanText(event.title),
+        startDate: start.date,
+        endDate: end.date,
+        startTime: start.time,
+        endTime: end.time,
+        location: mobilizeLocation(event),
+        description: shorten(textFromHtml(event.description || event.summary || ""), 1800),
+        imageUrl: event.featured_image_url || event.sponsor?.logo_url || "",
+        url: event.browser_url || partner.url,
+        sourceUrl: partner.url,
+        kind: partner.kind || "event",
+        scrapedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return records;
+}
+
+function mobilizeDateTime(timestamp, timezone = "America/New_York") {
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return { date: "", time: "" };
+  }
+  const date = new Date(seconds * 1000);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone || "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  }).formatToParts(date);
+  const value = (type) => parts.find((part) => part.type === type)?.value || "";
+  const dayPeriod = value("dayPeriod");
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    time: cleanText(`${value("hour")}:${value("minute")} ${dayPeriod}`).toUpperCase(),
+  };
+}
+
+function mobilizeLocation(event) {
+  if (event.is_virtual) {
+    return event.virtual_action_url ? `Virtual: ${event.virtual_action_url}` : "Virtual";
+  }
+  const location = event.location || {};
+  return cleanText([
+    location.venue,
+    ...(Array.isArray(location.address_lines) ? location.address_lines : []),
+    location.locality,
+    location.region,
+    location.postal_code,
+  ].filter(Boolean).join(", "));
 }
 
 async function parseEmbeddedCalendar(rawHtml, cleanHtml, partner) {

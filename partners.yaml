@@ -33,3 +33,8 @@ partners:
     url: "https://ablenh.org/category/able-nh-news/"
     parser: "wordpress_posts"
     kind: "announcement"
+
+  - name: "ACLU NH"
+    url: "https://www.mobilize.us/aclunh/"
+    parser: "mobilize_events"
+    kind: "event"

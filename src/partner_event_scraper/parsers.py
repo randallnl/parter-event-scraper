@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import dateparser
 from bs4 import BeautifulSoup, Tag
@@ -256,6 +257,69 @@ def embedded_calendar(
     yield from heading_date_events(soup, partner, scraped_at)
     yield from generic_links(soup, partner, scraped_at)
     yield from json_ld_events(soup, partner, scraped_at)
+
+
+def mobilize_events(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    try:
+        body = json.loads(soup.get_text())
+    except json.JSONDecodeError:
+        return
+
+    for event in body.get("data", []):
+        for timeslot in event.get("timeslots", []):
+            start_date, start_time = mobilize_date_time(timeslot.get("start_date"), event.get("timezone"))
+            end_date, end_time = mobilize_date_time(timeslot.get("end_date"), event.get("timezone"))
+            if not event.get("title") or not start_date:
+                continue
+            yield EventRecord(
+                partner=partner["name"],
+                title=clean_text(event["title"]),
+                start_date=start_date,
+                end_date=end_date,
+                start_time=start_time,
+                end_time=end_time,
+                location=mobilize_location(event),
+                description=shorten(clean_text(BeautifulSoup(event.get("description") or event.get("summary") or "", "html.parser").get_text(" ")), 1800),
+                image_url=event.get("featured_image_url") or event.get("sponsor", {}).get("logo_url", ""),
+                url=event.get("browser_url") or partner["url"],
+                source_url=partner["url"],
+                kind=partner.get("kind", "event"),
+                scraped_at=scraped_at,
+            )
+
+
+def mobilize_date_time(timestamp: object, timezone: str | None = None) -> tuple[str, str]:
+    try:
+        parsed = datetime.fromtimestamp(
+            int(timestamp),
+            tz=ZoneInfo(timezone or "America/New_York"),
+        )
+    except (TypeError, ValueError, OSError, ZoneInfoNotFoundError):
+        return "", ""
+    return parsed.date().isoformat(), parsed.strftime("%-I:%M %p").upper()
+
+
+def mobilize_location(event: dict) -> str:
+    if event.get("is_virtual"):
+        return f"Virtual: {event['virtual_action_url']}" if event.get("virtual_action_url") else "Virtual"
+
+    location = event.get("location") or {}
+    address_lines = location.get("address_lines") or []
+    return clean_text(
+        ", ".join(
+            str(part)
+            for part in [
+                location.get("venue"),
+                *address_lines,
+                location.get("locality"),
+                location.get("region"),
+                location.get("postal_code"),
+            ]
+            if part
+        )
+    )
 
 
 def json_ld_events(
@@ -513,4 +577,5 @@ PARSERS: dict[str, Callable[[BeautifulSoup, dict, str], Iterable[EventRecord]]] 
     "generic_links": generic_links,
     "shopify_blog_events": shopify_blog_events,
     "embedded_calendar": embedded_calendar,
+    "mobilize_events": mobilize_events,
 }
