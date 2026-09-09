@@ -48,6 +48,16 @@ def squarespace_events(
     soup: BeautifulSoup, partner: dict, scraped_at: str
 ) -> Iterable[EventRecord]:
     source_url = partner["url"]
+    eventlist_records = list(squarespace_event_articles(soup, partner, scraped_at))
+    if eventlist_records:
+        yield from eventlist_records
+        return
+
+    linked_card_records = list(linked_image_event_cards(soup, partner, scraped_at))
+    if linked_card_records:
+        yield from linked_card_records
+        return
+
     for heading in soup.find_all(["h1", "h2", "h3"]):
         title = clean_text(heading.get_text(" "))
         if not title or len(title) > 180 or title.lower() in {"upcoming events", "past events"}:
@@ -83,6 +93,90 @@ def squarespace_events(
             kind=partner.get("kind", "event"),
             scraped_at=scraped_at,
         )
+
+
+def squarespace_event_articles(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    source_url = partner["url"]
+    for article in soup.select("article.eventlist-event"):
+        heading = article.select_one(".eventlist-title") or article.find(["h1", "h2", "h3"])
+        title = clean_text(heading.get_text(" ")) if heading else ""
+        if not title or title.lower() in {"upcoming events", "past events"}:
+            continue
+        block_text = clean_text(article.get_text(" "))
+        date_text = full_date_from_text(block_text)
+        if not date_text:
+            continue
+        link = heading.find("a", href=True) if heading else None
+        start_time, end_time = parse_time_range(block_text)
+        start_date = normalize_date(date_text)
+        yield EventRecord(
+            partner=partner["name"],
+            title=title,
+            start_date=start_date,
+            end_date=parse_end_date(block_text, start_date),
+            start_time=start_time,
+            end_time=end_time,
+            location=find_location(block_text),
+            description=shorten(remove_calendar_noise(block_text), 700),
+            image_url=find_image_url([article], source_url),
+            url=urljoin(source_url, link["href"]) if link else source_url,
+            source_url=source_url,
+            kind=partner.get("kind", "event"),
+            scraped_at=scraped_at,
+        )
+
+
+def linked_image_event_cards(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    source_url = partner["url"]
+    seen_urls: set[str] = set()
+    for link in soup.find_all("a", href=True):
+        href = str(link["href"])
+        if "/events/" not in href or not link.find("img"):
+            continue
+        url = urljoin(source_url, href)
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        card = nearest_event_card(link)
+        card_text = clean_text(card.get_text(" "))
+        date_text = full_date_from_text(card_text)
+        title_node = card.find(["h1", "h2", "h3", "h4"])
+        title = clean_text(title_node.get_text(" ")) if title_node else clean_text(link.get("aria-label", ""))
+        title = re.sub(r"^View details for\s+", "", title, flags=re.I)
+        if not title or not date_text or title.lower() in {"events", "community events"}:
+            continue
+
+        start_time, end_time = parse_time_range(card_text)
+        yield EventRecord(
+            partner=partner["name"],
+            title=title,
+            start_date=normalize_date(date_text),
+            end_date=parse_end_date(card_text, normalize_date(date_text)),
+            start_time=start_time,
+            end_time=end_time,
+            location=find_location(card_text),
+            description=shorten(card.find("p").get_text(" ") if card.find("p") else card_text, 700),
+            image_url=find_image_url([link], source_url),
+            url=url,
+            source_url=source_url,
+            kind=partner.get("kind", "event"),
+            scraped_at=scraped_at,
+        )
+
+
+def nearest_event_card(link: Tag) -> Tag:
+    for parent in link.parents:
+        if not isinstance(parent, Tag):
+            continue
+        text = clean_text(parent.get_text(" "))
+        if parent.find(["h1", "h2", "h3", "h4"]) and full_date_from_text(text):
+            return parent
+    return link
 
 
 def heading_date_events(

@@ -61,6 +61,45 @@ def test_squarespace_events_uses_image_from_same_event_article():
     assert records[1].image_url == "https://images.example.org/second.png"
 
 
+def test_squarespace_events_uses_linked_image_card_for_mosaic_style_pages():
+    html = """
+    <div class="grid">
+      <div data-slot="card">
+        <a href="/events/community-meetup" aria-label="View details for Community Meetup">
+          <img src="https://images.example.org/community.png?w=334&amp;q=80" alt="Community Meetup image">
+        </a>
+        <h3>Community Meetup</h3>
+        <span>September 8, 2026</span>
+        <span>10:00 PM – 11:30 PM</span>
+        <p>Join us for an evening to catch up and share.</p>
+      </div>
+      <div data-slot="card">
+        <a href="/events/community-studio" aria-label="View details for Community Studio">
+          <img src="https://images.example.org/studio.png?w=334&amp;q=80" alt="Community Studio image">
+        </a>
+        <h3>Community Studio</h3>
+        <span>September 15, 2026</span>
+        <span>6:00 PM – 8:00 PM</span>
+        <p>Open studio time.</p>
+      </div>
+    </div>
+    """
+    partner = {
+        "name": "Mosaic Art Collective",
+        "url": "https://mosaicartcollective.com/events",
+        "parser": "squarespace_events",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-09-08T12:00:00+00:00")
+
+    assert [record.title for record in records] == ["Community Meetup", "Community Studio"]
+    assert records[0].image_url == "https://images.example.org/community.png?w=334&q=80"
+    assert records[1].image_url == "https://images.example.org/studio.png?w=334&q=80"
+    assert records[0].start_time == "10:00 PM"
+    assert records[0].end_time == "11:30 PM"
+
+
 def test_heading_date_events_uses_nearest_date_heading():
     html = """
     <p>August 8, 2026</p>

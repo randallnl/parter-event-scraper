@@ -730,6 +730,11 @@ function parseSquarespaceEvents(html, partner) {
     return articleRecords;
   }
 
+  const cardRecords = parseLinkedImageEventCards(html, partner);
+  if (cardRecords.length) {
+    return cardRecords;
+  }
+
   const records = [];
   const headings = headingMatches(html);
 
@@ -761,6 +766,46 @@ function parseSquarespaceEvents(html, partner) {
       description: shorten(removeCalendarNoise(blockText), 700),
       imageUrl: firstImageUrl(block, partner.url),
       url: absoluteUrl(firstHref(heading.content) || firstHref(block) || partner.url, partner.url),
+      sourceUrl: partner.url,
+      kind: partner.kind || "event",
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  return records;
+}
+
+function parseLinkedImageEventCards(html, partner) {
+  const records = [];
+  const linkRegex = /<a\b[^>]*href=["']([^"']*\/events\/[^"']+)["'][^>]*>[\s\S]*?<img\b[\s\S]*?<\/a>/gi;
+  const links = [...html.matchAll(linkRegex)];
+
+  for (let index = 0; index < links.length; index += 1) {
+    const match = links[index];
+    const href = match[1];
+    const cardEnd = links[index + 1]?.index ?? Math.min(html.length, match.index + 4500);
+    const card = html.slice(match.index, cardEnd);
+    const title =
+      textFromHtml(card.match(/<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>/i)?.[1] || "") ||
+      titleFromAriaLabel(match[0]);
+    const dateText = firstLongDate(textFromHtml(card));
+    if (!title || !dateText || /^(events|community events)$/i.test(title)) {
+      continue;
+    }
+
+    const cardText = textFromHtml(card);
+    const timeRange = parseTimeRange(cardText);
+    records.push({
+      partner: partner.name,
+      title,
+      startDate: normalizeDate(dateText),
+      endDate: secondLongDate(cardText),
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+      location: locationFromText(cardText),
+      description: shorten(descriptionFromCardHtml(card) || removeCalendarNoise(cardText), 700),
+      imageUrl: firstImageUrl(match[0], partner.url),
+      url: absoluteUrl(href, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "event",
       scrapedAt: new Date().toISOString(),
@@ -1390,6 +1435,17 @@ function firstEventTitleHref(html) {
     "";
 }
 
+function titleFromAriaLabel(html) {
+  return textFromHtml(attributeValue(html, "aria-label").replace(/^View details for\s+/i, ""));
+}
+
+function descriptionFromCardHtml(html) {
+  const paragraphs = [...html.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((match) => textFromHtml(match[1]))
+    .filter(Boolean);
+  return paragraphs[0] || "";
+}
+
 function metaContent(html, name) {
   const escaped = escapeRegExp(name);
   return (
@@ -1411,7 +1467,7 @@ function firstImageUrl(html, baseUrl) {
     attributeValue(imageHtml, "data-image") ||
     attributeValue(imageHtml, "src") ||
     firstSrcsetUrl(attributeValue(imageHtml, "srcset"));
-  return src ? absoluteUrl(src, baseUrl) : "";
+  return src ? absoluteUrl(decodeHtmlAttribute(src), baseUrl) : "";
 }
 
 function attributeValue(html, name) {
@@ -1558,7 +1614,7 @@ function datePartsFromDateTime(value) {
 
 function parseTimeRange(text) {
   const match = text.match(
-    /\b(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))\s*(?:-|to|\s+)\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))\b/,
+    /\b(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))\s*(?:-|to|–|—|\s+)\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))\b/,
   );
   if (!match) {
     return { startTime: "", endTime: "" };
