@@ -725,6 +725,11 @@ function isCalendarCandidate(value) {
 }
 
 function parseSquarespaceEvents(html, partner) {
+  const articleRecords = parseSquarespaceEventArticles(html, partner);
+  if (articleRecords.length) {
+    return articleRecords;
+  }
+
   const records = [];
   const headings = headingMatches(html);
 
@@ -756,6 +761,46 @@ function parseSquarespaceEvents(html, partner) {
       description: shorten(removeCalendarNoise(blockText), 700),
       imageUrl: firstImageUrl(block, partner.url),
       url: absoluteUrl(firstHref(heading.content) || firstHref(block) || partner.url, partner.url),
+      sourceUrl: partner.url,
+      kind: partner.kind || "event",
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  return records;
+}
+
+function parseSquarespaceEventArticles(html, partner) {
+  const records = [];
+  const articleRegex = /<article\b[^>]*class=["'][^"']*\beventlist-event\b[^"']*["'][^>]*>[\s\S]*?<\/article>/gi;
+
+  for (const match of html.matchAll(articleRegex)) {
+    const article = match[0];
+    const heading = article.match(/<h[1-3]\b[^>]*class=["'][^"']*\beventlist-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h[1-3]>/i) ||
+      article.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i);
+    const title = textFromHtml(heading?.[1] || "");
+    if (!title || /^(upcoming events|past events)$/i.test(title)) {
+      continue;
+    }
+
+    const articleText = textFromHtml(article);
+    const dateText = firstLongDate(articleText);
+    if (!dateText) {
+      continue;
+    }
+
+    const timeRange = parseTimeRange(articleText);
+    records.push({
+      partner: partner.name,
+      title,
+      startDate: normalizeDate(dateText),
+      endDate: secondLongDate(articleText),
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+      location: locationFromText(articleText),
+      description: shorten(removeCalendarNoise(articleText), 700),
+      imageUrl: firstImageUrl(article, partner.url),
+      url: absoluteUrl(firstHref(heading?.[0] || "") || firstEventTitleHref(article) || firstHref(article) || partner.url, partner.url),
       sourceUrl: partner.url,
       kind: partner.kind || "event",
       scrapedAt: new Date().toISOString(),
@@ -1339,6 +1384,12 @@ function firstHref(html) {
   return html.match(/href=["']([^"']+)["']/i)?.[1] || "";
 }
 
+function firstEventTitleHref(html) {
+  return html.match(/<a\b[^>]*class=["'][^"']*\beventlist-title-link\b[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] ||
+    html.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*\beventlist-title-link\b[^"']*["']/i)?.[1] ||
+    "";
+}
+
 function metaContent(html, name) {
   const escaped = escapeRegExp(name);
   return (
@@ -1356,9 +1407,10 @@ function firstImageUrl(html, baseUrl) {
 
   const imageHtml = imageMatch[0];
   const src =
+    attributeValue(imageHtml, "data-src") ||
+    attributeValue(imageHtml, "data-image") ||
     attributeValue(imageHtml, "src") ||
-    firstSrcsetUrl(attributeValue(imageHtml, "srcset")) ||
-    attributeValue(imageHtml, "data-src");
+    firstSrcsetUrl(attributeValue(imageHtml, "srcset"));
   return src ? absoluteUrl(src, baseUrl) : "";
 }
 

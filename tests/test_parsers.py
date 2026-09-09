@@ -34,14 +34,14 @@ def test_squarespace_events_uses_image_from_same_event_article():
     html = """
     <article class="eventlist-event eventlist-event--hasimg">
       <a href="/events/first" class="eventlist-column-thumbnail">
-        <img src="https://images.example.org/first.png" alt="First Event">
+        <img src="/placeholder.png" data-src="https://images.example.org/first.png" alt="First Event">
       </a>
       <h1 class="eventlist-title"><a href="/events/first">First Event</a></h1>
       <ul><li>Sunday, July 12, 2026</li><li>10:00 AM 11:00 AM</li></ul>
     </article>
     <article class="eventlist-event eventlist-event--hasimg">
       <a href="/events/second" class="eventlist-column-thumbnail">
-        <img src="https://images.example.org/second.png" alt="Second Event">
+        <img src="/placeholder.png" data-src="https://images.example.org/second.png" alt="Second Event">
       </a>
       <h1 class="eventlist-title"><a href="/events/second">Second Event</a></h1>
       <ul><li>Monday, July 13, 2026</li><li>1:00 PM 2:00 PM</li></ul>

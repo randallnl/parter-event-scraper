@@ -461,7 +461,7 @@ def find_image_url(nodes: list[Tag | None], source_url: str) -> str:
         image = node.find("img")
         if not image:
             continue
-        value = image.get("src") or first_srcset_url(image.get("srcset", ""))
+        value = image.get("data-src") or image.get("data-image") or image.get("src") or first_srcset_url(image.get("srcset", ""))
         if value:
             return urljoin(source_url, value)
     return ""
