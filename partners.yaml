@@ -38,3 +38,8 @@ partners:
     url: "https://www.mobilize.us/aclunh/"
     parser: "mobilize_events"
     kind: "event"
+
+  - name: "Manchester Community Action Coalition"
+    url: "https://www.mcacnh.org/event-list"
+    parser: "wix_events"
+    kind: "event"

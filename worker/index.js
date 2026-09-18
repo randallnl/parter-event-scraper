@@ -276,6 +276,7 @@ function workspaceHtml() {
           <select id="parser" required>
             <option value="embedded_calendar">embedded_calendar</option>
             <option value="mobilize_events">mobilize_events</option>
+            <option value="wix_events">wix_events</option>
             <option value="shopify_blog_events">shopify_blog_events</option>
             <option value="squarespace_events">squarespace_events</option>
             <option value="heading_date_events">heading_date_events</option>
@@ -511,6 +512,8 @@ async function parsePartner(html, partner) {
       return parseEmbeddedCalendar(html, cleanHtml, partner);
     case "mobilize_events":
       return parseMobilizeEvents(html, partner);
+    case "wix_events":
+      return parseWixEvents(html, partner);
     default:
       throw new Error(`Unsupported parser: ${partner.parser}`);
   }
@@ -541,6 +544,151 @@ async function parseMobilizeEvents(html, partner) {
   }
 
   return deduplicate(records);
+}
+
+function parseWixEvents(html, partner) {
+  const warmupData = parseJsonObjectAfterKey(html, '"appsWarmupData"');
+  if (!warmupData) {
+    return [];
+  }
+
+  const records = [];
+  for (const events of wixEventArrays(warmupData)) {
+    for (const event of events) {
+      const record = wixEventRecord(event, partner);
+      if (record) {
+        records.push(record);
+      }
+    }
+  }
+
+  return records;
+}
+
+function wixEventArrays(value) {
+  const arrays = [];
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    if (
+      Array.isArray(node.events) &&
+      node.events.some((event) => event && event.title && event.scheduling)
+    ) {
+      arrays.push(node.events);
+    }
+    for (const child of Object.values(node)) {
+      if (child && typeof child === "object") {
+        visit(child);
+      }
+    }
+  };
+  visit(value);
+  return arrays;
+}
+
+function wixEventRecord(event, partner) {
+  const title = cleanText(event.title || "");
+  const scheduling = event.scheduling || {};
+  const config = scheduling.config || {};
+  const startDate = normalizeDate(
+    scheduling.startDateFormatted ||
+      config.startDate ||
+      scheduling.startDateISOFormatNotUTC ||
+      "",
+  );
+  if (!title || !startDate) {
+    return null;
+  }
+
+  return {
+    partner: partner.name,
+    title,
+    startDate,
+    endDate: normalizeDate(
+      scheduling.endDateFormatted ||
+        config.endDate ||
+        scheduling.endDateISOFormatNotUTC ||
+        "",
+    ),
+    startTime: cleanText(scheduling.startTimeFormatted || datePartsFromDateTime(config.startDate || "").time),
+    endTime: cleanText(scheduling.endTimeFormatted || datePartsFromDateTime(config.endDate || "").time),
+    location: wixLocation(event.location),
+    description: shorten(textFromHtml(`${event.description || ""} ${event.about || ""}`), 1800),
+    imageUrl: event.mainImage?.url || "",
+    url: wixEventUrl(event, partner.url),
+    sourceUrl: partner.url,
+    kind: partner.kind || "event",
+    scrapedAt: new Date().toISOString(),
+  };
+}
+
+function wixLocation(location) {
+  if (!location || typeof location !== "object" || location.tbd) {
+    return "";
+  }
+  return cleanText(
+    [location.name, location.address || location.fullAddress?.formattedAddress]
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join(", "),
+  );
+}
+
+function wixEventUrl(event, sourceUrl) {
+  if (event.eventPageUrl?.base) {
+    return absoluteUrl(event.eventPageUrl.base, sourceUrl);
+  }
+  if (event.slug) {
+    return absoluteUrl(`/event-details/${event.slug}`, sourceUrl);
+  }
+  return sourceUrl;
+}
+
+function parseJsonObjectAfterKey(html, key) {
+  const keyIndex = html.indexOf(key);
+  if (keyIndex < 0) {
+    return null;
+  }
+
+  const colonIndex = html.indexOf(":", keyIndex + key.length);
+  const start = html.indexOf("{", colonIndex);
+  if (colonIndex < 0 || start < 0) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < html.length; index += 1) {
+    const char = html[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, index + 1));
+        } catch (_error) {
+          return null;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 function mobilizeEventsApiUrl(organizationId) {

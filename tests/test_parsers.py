@@ -302,3 +302,67 @@ def test_mobilize_events_extracts_each_timeslot():
     assert records[0].description == "Join community members for Pride."
     assert records[0].image_url == "https://mobilizeamerica.imgix.net/uploads/event/pride.png"
     assert records[0].url == "https://www.mobilize.us/aclunh/event/950300/"
+
+
+def test_wix_events_extracts_warmup_event_records():
+    warmup = {
+        "140603ad-af8d-84a5-2c80-a0f60cb47351": {
+            "widgetTPASection_moj7b2gl": {
+                "events": {
+                    "events": [
+                        {
+                            "id": "bdd7dcbc-e2ac-4b79-8515-c36f8ec95425",
+                            "title": "We Are One Festival",
+                            "description": "Free admission and all are welcome.",
+                            "about": "<p>Music, dance, food, art, culture, community.</p>",
+                            "slug": "we-are-one-festival",
+                            "location": {
+                                "name": "Veteran's Memorial Park",
+                                "address": "723 Elm St, Manchester, NH 03101, USA",
+                                "tbd": False,
+                            },
+                            "scheduling": {
+                                "config": {
+                                    "startDate": "2026-08-15T15:00:00.000Z",
+                                    "endDate": "2026-08-15T22:00:00.000Z",
+                                    "timeZoneId": "America/New_York",
+                                },
+                                "startDateFormatted": "August 15, 2026",
+                                "startTimeFormatted": "11:00 AM",
+                                "endDateFormatted": "August 15, 2026",
+                                "endTimeFormatted": "6:00 PM",
+                            },
+                            "mainImage": {
+                                "url": "https://static.wixstatic.com/media/festival.png",
+                                "height": 1496,
+                                "width": 1536,
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    html = f"""
+    <script>
+      window.viewerModel = {{"appsWarmupData": {json.dumps(warmup)}, "ooi": {{}}}};
+    </script>
+    """
+    partner = {
+        "name": "MCAC",
+        "url": "https://www.mcacnh.org/event-list",
+        "parser": "wix_events",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-09-18T12:00:00+00:00")
+
+    assert len(records) == 1
+    assert records[0].title == "We Are One Festival"
+    assert records[0].start_date == "2026-08-15"
+    assert records[0].start_time == "11:00 AM"
+    assert records[0].end_time == "6:00 PM"
+    assert records[0].location == "Veteran's Memorial Park, 723 Elm St, Manchester, NH 03101, USA"
+    assert records[0].description == "Free admission and all are welcome. Music, dance, food, art, culture, community."
+    assert records[0].image_url == "https://static.wixstatic.com/media/festival.png"
+    assert records[0].url == "https://www.mcacnh.org/event-details/we-are-one-festival"

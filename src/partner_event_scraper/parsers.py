@@ -34,7 +34,8 @@ MONTH_YEAR_RE = re.compile(
 
 def parse_html(html: str, partner: dict, scraped_at: str) -> list[EventRecord]:
     soup = BeautifulSoup(html, "html.parser")
-    ignored = ("style", "noscript", "svg") if partner["parser"] == "embedded_calendar" else ("script", "style", "noscript", "svg")
+    script_parsers = {"embedded_calendar", "wix_events"}
+    ignored = ("style", "noscript", "svg") if partner["parser"] in script_parsers else ("script", "style", "noscript", "svg")
     for selector in ignored:
         for node in soup.select(selector):
             node.decompose()
@@ -384,6 +385,138 @@ def mobilize_events(
             )
 
 
+def wix_events(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    warmup_data = parse_json_object_after_key(str(soup), '"appsWarmupData"')
+    if not isinstance(warmup_data, dict):
+        return
+
+    for events in wix_event_arrays(warmup_data):
+        for event in events:
+            record = wix_event_record(event, partner, scraped_at)
+            if record:
+                yield record
+
+
+def wix_event_arrays(value: object) -> Iterable[list[dict]]:
+    if not isinstance(value, dict):
+        return
+    events = value.get("events")
+    if (
+        isinstance(events, list)
+        and any(isinstance(event, dict) and event.get("title") and event.get("scheduling") for event in events)
+    ):
+        yield events
+    for child in value.values():
+        if isinstance(child, dict):
+            yield from wix_event_arrays(child)
+        elif isinstance(child, list):
+            for item in child:
+                yield from wix_event_arrays(item)
+
+
+def wix_event_record(event: dict, partner: dict, scraped_at: str) -> EventRecord | None:
+    title = clean_text(str(event.get("title") or ""))
+    scheduling = event.get("scheduling") if isinstance(event.get("scheduling"), dict) else {}
+    config = scheduling.get("config") if isinstance(scheduling.get("config"), dict) else {}
+    start_date = normalize_date(
+        str(
+            scheduling.get("startDateFormatted")
+            or config.get("startDate")
+            or scheduling.get("startDateISOFormatNotUTC")
+            or ""
+        )
+    )
+    if not title or not start_date:
+        return None
+
+    location = event.get("location") if isinstance(event.get("location"), dict) else {}
+    image = event.get("mainImage") if isinstance(event.get("mainImage"), dict) else {}
+    return EventRecord(
+        partner=partner["name"],
+        title=title,
+        start_date=start_date,
+        end_date=normalize_date(
+            str(
+                scheduling.get("endDateFormatted")
+                or config.get("endDate")
+                or scheduling.get("endDateISOFormatNotUTC")
+                or ""
+            )
+        ),
+        start_time=clean_text(str(scheduling.get("startTimeFormatted") or date_time_parts(str(config.get("startDate") or ""))[1])),
+        end_time=clean_text(str(scheduling.get("endTimeFormatted") or date_time_parts(str(config.get("endDate") or ""))[1])),
+        location=wix_location(location),
+        description=shorten(clean_text(BeautifulSoup(f"{event.get('description') or ''} {event.get('about') or ''}", "html.parser").get_text(" ")), 1800),
+        image_url=str(image.get("url") or ""),
+        url=wix_event_url(event, partner["url"]),
+        source_url=partner["url"],
+        kind=partner.get("kind", "event"),
+        scraped_at=scraped_at,
+    )
+
+
+def wix_location(location: dict) -> str:
+    if not location or location.get("tbd"):
+        return ""
+    full_address = location.get("fullAddress") if isinstance(location.get("fullAddress"), dict) else {}
+    parts = [
+        location.get("name"),
+        location.get("address") or full_address.get("formattedAddress"),
+    ]
+    unique = []
+    for part in parts:
+        if part and part not in unique:
+            unique.append(str(part))
+    return clean_text(", ".join(unique))
+
+
+def wix_event_url(event: dict, source_url: str) -> str:
+    event_page = event.get("eventPageUrl") if isinstance(event.get("eventPageUrl"), dict) else {}
+    if event_page.get("base"):
+        return urljoin(source_url, str(event_page["base"]))
+    if event.get("slug"):
+        return urljoin(source_url, f"/event-details/{event['slug']}")
+    return source_url
+
+
+def parse_json_object_after_key(html: str, key: str) -> object | None:
+    key_index = html.find(key)
+    if key_index < 0:
+        return None
+    colon_index = html.find(":", key_index + len(key))
+    start = html.find("{", colon_index)
+    if colon_index < 0 or start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(html)):
+        char = html[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(html[start : index + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def mobilize_date_time(timestamp: object, timezone: str | None = None) -> tuple[str, str]:
     try:
         parsed = datetime.fromtimestamp(
@@ -672,4 +805,5 @@ PARSERS: dict[str, Callable[[BeautifulSoup, dict, str], Iterable[EventRecord]]] 
     "shopify_blog_events": shopify_blog_events,
     "embedded_calendar": embedded_calendar,
     "mobilize_events": mobilize_events,
+    "wix_events": wix_events,
 }
