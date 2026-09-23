@@ -366,3 +366,60 @@ def test_wix_events_extracts_warmup_event_records():
     assert records[0].description == "Free admission and all are welcome. Music, dance, food, art, culture, community."
     assert records[0].image_url == "https://static.wixstatic.com/media/festival.png"
     assert records[0].url == "https://www.mcacnh.org/event-details/we-are-one-festival"
+
+
+def test_wp_event_manager_extracts_event_cards():
+    html = """
+    <div class="event_listing event-type-in-person">
+      <a href="https://www.livefreeautonomy.org/event/queer-arm-wrestling-tournament-north-conway/" class="wpem-event-action-url">
+        <div class="wpem-event-banner-img" style="background-image: url(https://www.livefreeautonomy.org/wp-content/uploads/2026/08/FAT26-Event-Headers-21.png)"></div>
+        <div class="wpem-event-title">
+          <h3 class="wpem-heading-text">Queer Arm Wrestling Tournament North Conway</h3>
+        </div>
+        <div class="wpem-event-date-time">
+          <span class="wpem-event-date-time-text">2026-08-16 @ 06:00 PM</span>
+        </div>
+        <div class="wpem-event-location">
+          <span class="wpem-event-location-text">Cheese Louise, 2686 S Main St, North Conway, NH 03860</span>
+        </div>
+        <div class="wpem-event-type"><span class="wpem-event-type-text event-type in-person">In Person</span></div>
+      </a>
+    </div>
+    <div class="event_listing event-type-in-person">
+      <a href="https://www.livefreeautonomy.org/event/queer-conception-group/" class="wpem-event-action-url">
+        <div class="wpem-event-banner-img" style="background-image: url(https://www.livefreeautonomy.org/wp-content/uploads/2026/08/pastel-gradient-2.png)"></div>
+        <div class="wpem-event-title">
+          <h3 class="wpem-heading-text">Queer Conception Group</h3>
+        </div>
+        <div class="wpem-event-date-time">
+          <span class="wpem-event-date-time-text">2026-08-30 @ 08:00 PM - 2026-08-30 @ 09:30 PM</span>
+        </div>
+        <div class="wpem-event-location">
+          <span class="wpem-event-location-text">Aplomb Art Cafe and Gallery, 262 Central Ave, Dover, NH</span>
+        </div>
+        <div class="wpem-event-type"><span class="wpem-event-type-text event-type in-person">In Person</span></div>
+      </a>
+    </div>
+    """
+    partner = {
+        "name": "Live Free Autonomy Collective",
+        "url": "https://www.livefreeautonomy.org/events/",
+        "parser": "wp_event_manager",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-09-23T12:00:00+00:00")
+
+    assert [record.title for record in records] == [
+        "Queer Arm Wrestling Tournament North Conway",
+        "Queer Conception Group",
+    ]
+    assert records[0].start_date == "2026-08-16"
+    assert records[0].start_time == "06:00 PM"
+    assert records[0].location == "Cheese Louise, 2686 S Main St, North Conway, NH 03860"
+    assert records[0].image_url == "https://www.livefreeautonomy.org/wp-content/uploads/2026/08/FAT26-Event-Headers-21.png"
+    assert records[1].start_date == "2026-08-30"
+    assert records[1].end_date == ""
+    assert records[1].start_time == "08:00 PM"
+    assert records[1].end_time == "09:30 PM"
+    assert records[1].url == "https://www.livefreeautonomy.org/event/queer-conception-group/"

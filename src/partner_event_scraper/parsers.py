@@ -295,6 +295,48 @@ def generic_links(
         )
 
 
+def wp_event_manager(
+    soup: BeautifulSoup, partner: dict, scraped_at: str
+) -> Iterable[EventRecord]:
+    source_url = partner["url"]
+    for card in soup.select(".event_listing"):
+        title_node = card.select_one(".wpem-event-title h1, .wpem-event-title h2, .wpem-event-title h3, .wpem-event-title h4")
+        title = clean_text(title_node.get_text(" ")) if title_node else ""
+        date_text = clean_text(card.select_one(".wpem-event-date-time-text").get_text(" ")) if card.select_one(".wpem-event-date-time-text") else ""
+        start_date, start_time = wp_event_manager_datetime(date_text, 0)
+        if not title or not start_date:
+            continue
+
+        end_date, end_time = wp_event_manager_datetime(date_text, 1)
+        location_node = card.select_one(".wpem-event-location-text")
+        event_type_node = card.select_one(".wpem-event-type-text")
+        link = card.find("a", href=True)
+        location = clean_text(location_node.get_text(" ")) if location_node else ""
+        event_type = clean_text(event_type_node.get_text(" ")) if event_type_node else ""
+        yield EventRecord(
+            partner=partner["name"],
+            title=title,
+            start_date=start_date,
+            end_date=end_date if end_date != start_date else "",
+            start_time=start_time,
+            end_time=end_time,
+            location=location,
+            description=shorten(clean_text(" | ".join(part for part in [date_text, location, event_type] if part)), 700),
+            image_url=find_image_url([card], source_url),
+            url=urljoin(source_url, link["href"]) if link else source_url,
+            source_url=source_url,
+            kind=partner.get("kind", "event"),
+            scraped_at=scraped_at,
+        )
+
+
+def wp_event_manager_datetime(text: str, index: int) -> tuple[str, str]:
+    matches = re.findall(r"\b(\d{4}-\d{2}-\d{2})\s*@\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))", text)
+    if index >= len(matches):
+        return "", ""
+    return matches[index][0], clean_text(matches[index][1]).upper()
+
+
 def shopify_blog_events(
     soup: BeautifulSoup, partner: dict, scraped_at: str
 ) -> Iterable[EventRecord]:
@@ -685,6 +727,10 @@ def find_image_url(nodes: list[Tag | None], source_url: str) -> str:
     for node in nodes:
         if not isinstance(node, Tag):
             continue
+        for styled in [node, *node.find_all(style=True)]:
+            style = styled.get("style", "")
+            if match := re.search(r"background-image:\s*url\((['\"]?)([^)'\"]+)\1\)", style, flags=re.I):
+                return urljoin(source_url, match.group(2))
         image = node.find("img")
         if not image:
             continue
@@ -802,6 +848,7 @@ PARSERS: dict[str, Callable[[BeautifulSoup, dict, str], Iterable[EventRecord]]] 
     "squarespace_blog": squarespace_blog,
     "wordpress_posts": wordpress_posts,
     "generic_links": generic_links,
+    "wp_event_manager": wp_event_manager,
     "shopify_blog_events": shopify_blog_events,
     "embedded_calendar": embedded_calendar,
     "mobilize_events": mobilize_events,

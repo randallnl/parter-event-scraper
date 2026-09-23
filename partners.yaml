@@ -43,3 +43,8 @@ partners:
     url: "https://www.mcacnh.org/event-list"
     parser: "wix_events"
     kind: "event"
+
+  - name: "Live Free Autonomy Collective"
+    url: "https://www.livefreeautonomy.org/events/"
+    parser: "wp_event_manager"
+    kind: "event"

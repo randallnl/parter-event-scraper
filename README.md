@@ -102,6 +102,7 @@ The default partner list lives in `partners.yaml`. Add new partners there and ch
 - `embedded_calendar`: calendar pages that load events from an iframe, feed, JSON-LD, ICS file, or a linked Squarespace-style event collection.
 - `mobilize_events`: Mobilize organization feeds such as `https://www.mobilize.us/aclunh/`, using Mobilize's public organization events API.
 - `wix_events`: Wix Events calendar/list pages such as `https://www.mcacnh.org/event-list`, using the structured Wix event data embedded in the page.
+- `wp_event_manager`: WordPress WP Event Manager listings such as `https://www.livefreeautonomy.org/events/`.
 
 ## Output Fields
 

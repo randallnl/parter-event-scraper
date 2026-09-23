@@ -277,6 +277,7 @@ function workspaceHtml() {
             <option value="embedded_calendar">embedded_calendar</option>
             <option value="mobilize_events">mobilize_events</option>
             <option value="wix_events">wix_events</option>
+            <option value="wp_event_manager">wp_event_manager</option>
             <option value="shopify_blog_events">shopify_blog_events</option>
             <option value="squarespace_events">squarespace_events</option>
             <option value="heading_date_events">heading_date_events</option>
@@ -514,6 +515,8 @@ async function parsePartner(html, partner) {
       return parseMobilizeEvents(html, partner);
     case "wix_events":
       return parseWixEvents(html, partner);
+    case "wp_event_manager":
+      return parseWpEventManager(cleanHtml, partner);
     default:
       throw new Error(`Unsupported parser: ${partner.parser}`);
   }
@@ -1072,6 +1075,66 @@ function parseGenericLinks(html, partner) {
   }
 
   return records;
+}
+
+function parseWpEventManager(html, partner) {
+  const records = [];
+  const cardRegex = /<div\b[^>]*class=["'][^"']*\bevent_listing\b[^"']*["'][^>]*>[\s\S]*?(?=<\/div>\s*<\/div>\s*<\/div><div\b[^>]*class=["'][^"']*\bwpem-event-box-col\b|<\/div>\s*<\/div>\s*<\/div><\/div>\s*<\/div>\s*<\/div><!-- \.wpem-event-listings-instance -->)/gi;
+
+  for (const match of html.matchAll(cardRegex)) {
+    const card = match[0];
+    const title = textFromHtml(
+      card.match(/<div\b[^>]*class=["'][^"']*\bwpem-event-title\b[^"']*["'][^>]*>[\s\S]*?<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>/i)?.[1] || "",
+    );
+    const dateTimeText = textFromHtml(
+      card.match(/<span\b[^>]*class=["'][^"']*\bwpem-event-date-time-text\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "",
+    );
+    const start = wpEventManagerDateTime(dateTimeText, 0);
+    if (!title || !start.date) {
+      continue;
+    }
+
+    const end = wpEventManagerDateTime(dateTimeText, 1);
+    const location = textFromHtml(
+      card.match(/<span\b[^>]*class=["'][^"']*\bwpem-event-location-text\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "",
+    );
+    const eventType = textFromHtml(
+      card.match(/<span\b[^>]*class=["'][^"']*\bwpem-event-type-text\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "",
+    );
+    const href = firstHref(card);
+    const description = cleanText([dateTimeText, location, eventType].filter(Boolean).join(" | "));
+
+    records.push({
+      partner: partner.name,
+      title,
+      startDate: start.date,
+      endDate: end.date && end.date !== start.date ? end.date : "",
+      startTime: start.time,
+      endTime: end.time,
+      location,
+      description: shorten(description, 700),
+      imageUrl: wpEventManagerImageUrl(card, partner.url),
+      url: absoluteUrl(href || partner.url, partner.url),
+      sourceUrl: partner.url,
+      kind: partner.kind || "event",
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  return records;
+}
+
+function wpEventManagerDateTime(text, index) {
+  const matches = [...text.matchAll(/\b(\d{4}-\d{2}-\d{2})\s*@\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))/g)];
+  const match = matches[index];
+  return match
+    ? { date: match[1], time: cleanText(match[2]).toUpperCase() }
+    : { date: "", time: "" };
+}
+
+function wpEventManagerImageUrl(html, baseUrl) {
+  const styleImage = html.match(/background-image:\s*url\((['"]?)([^)'"]+)\1\)/i)?.[2] || "";
+  return styleImage ? absoluteUrl(decodeHtmlAttribute(styleImage), baseUrl) : firstImageUrl(html, baseUrl);
 }
 
 function parseSquarespaceBlog(html, partner) {
