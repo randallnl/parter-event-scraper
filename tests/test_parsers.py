@@ -61,6 +61,29 @@ def test_squarespace_events_uses_image_from_same_event_article():
     assert records[1].image_url == "https://images.example.org/second.png"
 
 
+def test_squarespace_events_prefers_explicit_years_over_date_badges():
+    html = """
+    <article class="eventlist-event">
+      <div class="event-date"><span>Jun 1</span><span>to Aug 1</span></div>
+      <h1 class="eventlist-title"><a href="/events/school-supply-drive">School Supply Drive</a></h1>
+      <p>Sun, Jun 1, 2025 9:00 AM Fri, Aug 1, 2025 10:00 AM</p>
+      <p>Help students get ready for school.</p>
+    </article>
+    """
+    partner = {
+        "name": "Black Lives Matter NH",
+        "url": "https://blmnh.org/events",
+        "parser": "squarespace_events",
+        "kind": "event",
+    }
+
+    records = parse_html(html, partner, "2026-11-02T12:00:00+00:00")
+
+    assert len(records) == 1
+    assert records[0].start_date == "2025-06-01"
+    assert records[0].end_date == "2025-08-01"
+
+
 def test_squarespace_events_uses_linked_image_card_for_mosaic_style_pages():
     html = """
     <div class="grid">

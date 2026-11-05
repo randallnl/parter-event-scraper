@@ -1742,20 +1742,26 @@ function cleanText(text) {
 }
 
 function firstLongDate(text) {
-  return text.match(longDatePattern())?.[0] || "";
+	return preferredLongDates(text)[0] || "";
 }
 
 function secondLongDate(text) {
-  const dates = [...text.matchAll(longDatePattern("gi"))];
+	const dates = preferredLongDates(text);
   if (dates.length < 2) {
     return "";
   }
-  return normalizeDate(dates[1][0]);
+	return normalizeDate(dates[1]);
 }
 
 function lastLongDate(text) {
-  const dates = [...text.matchAll(longDatePattern("gi"))];
-  return dates.length ? dates[dates.length - 1][0] : "";
+	const dates = preferredLongDates(text);
+	return dates.at(-1) || "";
+}
+
+function preferredLongDates(text) {
+	const dates = [...text.matchAll(longDatePattern("gi"))].map((match) => match[0]);
+	const datedWithYears = dates.filter((date) => /\b\d{4}\b/.test(date));
+	return datedWithYears.length ? datedWithYears : dates;
 }
 
 function removeFirstLongDate(text) {

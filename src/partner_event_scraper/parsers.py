@@ -773,9 +773,14 @@ def following_text(node: Tag, limit: int = 400) -> str:
 
 
 def full_date_from_text(text: str) -> str:
-    if match := DATE_RE.search(text):
-        return match.group(0)
-    return ""
+    dates = preferred_long_dates(text)
+    return dates[0] if dates else ""
+
+
+def preferred_long_dates(text: str) -> list[str]:
+    dates = [match.group(0) for match in DATE_RE.finditer(text)]
+    dated_with_years = [date for date in dates if re.search(r"\b\d{4}\b", date)]
+    return dated_with_years or dates
 
 
 def normalize_date(text: str) -> str:
@@ -797,7 +802,7 @@ def date_time_parts(value: str) -> tuple[str, str]:
 
 
 def parse_end_date(text: str, start_date: str) -> str:
-    dates = DATE_RE.findall(text)
+    dates = preferred_long_dates(text)
     if len(dates) < 2:
         return ""
     end_date = normalize_date(dates[1])
@@ -827,7 +832,7 @@ def remove_author_date(text: str) -> str:
 
 
 def last_full_date_from_text(text: str) -> str:
-    dates = DATE_RE.findall(text)
+    dates = preferred_long_dates(text)
     return dates[-1] if dates else ""
 
 
